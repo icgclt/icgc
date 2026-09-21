@@ -40,3 +40,29 @@ export function download(name, data, type) {
 export function downloadCSV(name, rows) {
   download(`${name}-${today()}.csv`, '\ufeff' + toCSV(rows), 'text/csv;charset=utf-8');
 }
+
+// Parses CSV text (handles quoted fields, commas/newlines inside quotes, CRLF or LF) into
+// an array of objects keyed by the header row. Tolerant of a leading BOM (Excel exports).
+export function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\r') { /* skip, \n handles the break */ }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  if (!rows.length) return [];
+  const headers = rows[0].map((h) => h.trim().toLowerCase());
+  return rows
+    .slice(1)
+    .filter((r) => r.some((c) => c.trim() !== ''))
+    .map((r) => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? '').trim()])));
+}

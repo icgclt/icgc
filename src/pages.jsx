@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, can, ROLES } from './auth';
 import { useData, TABLES } from './data';
 import { supabase } from './supabase';
 import Crud from './Crud';
-import { money, today, downloadCSV, download } from './utils';
+import { money, today, downloadCSV, download, parseCSV, uuid } from './utils';
 
 const STATUS = ['Active', 'Inactive', 'Visitor'];
 const SERVICES = ['Sunday Service', 'Midweek Service', 'Prayer Meeting', 'Other'];
@@ -56,9 +56,81 @@ export function Dashboard() {
 }
 
 /* ---------------- Modules (all use the generic Crud component) ---------------- */
+const MEMBER_CSV_FIELDS = ['name', 'phone', 'email', 'dob', 'gender', 'grp', 'status', 'address', 'notes'];
+
+function MemberImport() {
+  const { data, save } = useData();
+  const { role } = useAuth();
+  const fileRef = useRef(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (!can(role, 'members', 'write')) return null;
+
+  const downloadTemplate = () =>
+    download('members-template.csv', '\ufeff' + MEMBER_CSV_FIELDS.join(',') + '\r\n' + 'Jane Doe,0244000000,,,Female,Youth,Active,,\r\n', 'text/csv;charset=utf-8');
+
+  const importCSV = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    try {
+      const rows = parseCSV(await file.text());
+      if (!rows.length) { setMsg({ ok: false, text: 'No rows found in that file — check it has a header row plus at least one member.' }); return; }
+      const byName = new Map(data.members.map((m) => [m.name.trim().toLowerCase(), m]));
+      let added = 0, updated = 0, skipped = 0;
+      for (const r of rows) {
+        const name = (r.name || '').trim();
+        if (!name) { skipped++; continue; }
+        const match = byName.get(name.toLowerCase());
+        const status = r.status || match?.status || 'Active';
+        save('members', {
+          id: match ? match.id : uuid(),
+          name,
+          phone: r.phone || match?.phone || '',
+          email: r.email || match?.email || '',
+          dob: r.dob || match?.dob || null,
+          gender: r.gender || match?.gender || null,
+          grp: r.grp || r.group || match?.grp || '',
+          status: STATUS.includes(status) ? status : 'Active',
+          address: r.address || match?.address || '',
+          notes: r.notes || match?.notes || '',
+        });
+        match ? updated++ : added++;
+      }
+      setMsg({ ok: true, text: `Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped (missing name)` : ''}.` });
+    } catch (err) {
+      setMsg({ ok: false, text: 'Could not read that file. Make sure it is a plain CSV export.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="top" style={{ marginBottom: 10 }}>
+        <h2 style={{ margin: 0 }}>Bulk upload / download</h2>
+        <div className="btnrow">
+          <button className="secondary" onClick={downloadTemplate}>Download CSV template</button>
+          <button className="secondary" onClick={() => data.members.length ? downloadCSV('members', data.members) : alert('No members to export yet.')}>Download all members (CSV)</button>
+          <button className="primary" disabled={busy} onClick={() => fileRef.current.click()}>{busy ? 'Importing…' : 'Upload CSV'}</button>
+          <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={importCSV} />
+        </div>
+      </div>
+      <p className="muted sm">
+        CSV columns: <code>{MEMBER_CSV_FIELDS.join(', ')}</code>. Matching by name — a row whose name already
+        exists updates that member instead of creating a duplicate.
+      </p>
+      {msg && <div className={msg.ok ? 'muted' : 'err'} style={{ marginTop: 8 }}>{msg.text}</div>}
+    </div>
+  );
+}
+
 export function Members() {
   return (
-    <Crud
+    <>
+      <MemberImport />
+      <Crud
       table="members" title="Members" noun="member"
       sortKey="name" searchKeys={['name', 'phone', 'grp', 'email']}
       filters={[{ key: 'status', label: 'All statuses', options: STATUS }]}
@@ -80,7 +152,8 @@ export function Members() {
         { label: 'Group', key: 'grp' },
         { label: 'Status', render: (m) => badge(m.status) },
       ]}
-    />
+      />
+    </>
   );
 }
 
@@ -111,6 +184,104 @@ export function Attendance() {
         { label: 'Note', key: 'note' },
       ]}
     />
+  );
+}
+
+// Tap-to-cycle attendance sheet: one screen, one tap per member, no per-person forms.
+// Cycle per tap: unmarked -> Present -> Absent -> unmarked. Loads existing marks for the
+// chosen date+service so re-opening a sheet lets you correct it rather than duplicate it.
+export function QuickAttendance() {
+  const { data, save } = useData();
+  const [date, setDate] = useState(today());
+  const [service, setService] = useState('Sunday Service');
+  const [q, setQ] = useState('');
+  const [marks, setMarks] = useState({});
+
+  const members = useMemo(
+    () => [...data.members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name)),
+    [data.members],
+  );
+
+  const existing = useMemo(() => {
+    const map = new Map();
+    data.attendance.forEach((a) => { if (a.date === date && a.service === service) map.set(a.person_name, a); });
+    return map;
+  }, [data.attendance, date, service]);
+
+  useEffect(() => {
+    const next = {};
+    members.forEach((m) => { const ex = existing.get(m.name); if (ex) next[m.id] = ex.status; });
+    setMarks(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, service]);
+
+  const shown = members.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()));
+
+  const toggle = (id) => setMarks((prev) => {
+    const cur = prev[id];
+    const next = { ...prev };
+    if (cur === 'Present') next[id] = 'Absent';
+    else if (cur === 'Absent') delete next[id];
+    else next[id] = 'Present';
+    return next;
+  });
+
+  const markAllShown = (status) => setMarks((prev) => {
+    const next = { ...prev };
+    shown.forEach((m) => { next[m.id] = status; });
+    return next;
+  });
+
+  const saveAll = () => {
+    let n = 0;
+    members.forEach((m) => {
+      const status = marks[m.id];
+      if (!status) return;
+      const ex = existing.get(m.name);
+      save('attendance', { id: ex ? ex.id : uuid(), date, service, person_name: m.name, status, note: ex?.note || '' });
+      n++;
+    });
+    alert(n ? `Saved attendance for ${n} member(s).` : 'Nothing marked yet — tap names to mark them first.');
+  };
+
+  const presentCount = members.filter((m) => marks[m.id] === 'Present').length;
+  const absentCount = members.filter((m) => marks[m.id] === 'Absent').length;
+
+  return (
+    <>
+      <div className="top">
+        <h1>Quick Attendance</h1>
+        <button className="primary" onClick={saveAll}>Save attendance</button>
+      </div>
+      <div className="panel">
+        <div className="toolbar">
+          <div className="fld"><small>Date</small><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+          <div className="fld"><small>Service</small>
+            <select value={service} onChange={(e) => setService(e.target.value)}>
+              {SERVICES.map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </div>
+          <input placeholder="Search member…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="btnrow" style={{ marginBottom: 12 }}>
+          <button className="secondary sm" onClick={() => markAllShown('Present')}>Mark all shown Present</button>
+          <button className="secondary sm" onClick={() => markAllShown('Absent')}>Mark all shown Absent</button>
+        </div>
+        <p className="muted sm">{presentCount} present · {absentCount} absent · {members.length - presentCount - absentCount} unmarked. Tap a name to cycle: unmarked → Present → Absent → unmarked.</p>
+        <div className="quicklist">
+          {shown.map((m) => {
+            const status = marks[m.id];
+            return (
+              <button key={m.id} type="button" className={'quickrow' + (status ? ' ' + status.toLowerCase() : '')} onClick={() => toggle(m.id)}>
+                <span>{m.name}</span>
+                <span className="badge">{status || 'Unmarked'}</span>
+              </button>
+            );
+          })}
+          {!shown.length && <div className="empty">No members match.</div>}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -186,6 +357,103 @@ export function Events() {
   );
 }
 
+/* ---------------- SMS ---------------- */
+export function SendSMS() {
+  const { data } = useData();
+  const { role } = useAuth();
+  const allowed = ['admin', 'secretary'].includes(role);
+  const groups = [...new Set(data.members.map((m) => m.grp).filter(Boolean))].sort();
+
+  const [audience, setAudience] = useState('active');
+  const [group, setGroup] = useState(groups[0] || '');
+  const [picked, setPicked] = useState({});
+  const [q, setQ] = useState('');
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  if (!allowed) return (
+    <>
+      <div className="top"><h1>Send SMS</h1></div>
+      <div className="panel"><p className="muted">Only admins and secretaries can send SMS.</p></div>
+    </>
+  );
+
+  const withPhone = data.members.filter((m) => m.phone && String(m.phone).trim());
+  let recipients = [];
+  if (audience === 'active') recipients = withPhone.filter((m) => m.status === 'Active');
+  else if (audience === 'all') recipients = withPhone;
+  else if (audience === 'group') recipients = withPhone.filter((m) => m.grp === group);
+  else recipients = withPhone.filter((m) => picked[m.id]);
+
+  const shownForPick = withPhone.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const segments = Math.ceil((message.length || 0) / 160) || 0;
+
+  const send = async () => {
+    if (!recipients.length) { setResult({ ok: false, text: 'No recipients selected.' }); return; }
+    if (!message.trim()) { setResult({ ok: false, text: 'Write a message first.' }); return; }
+    if (!confirm(`Send this message to ${recipients.length} member(s)?`)) return;
+    setSending(true);
+    setResult(null);
+    try {
+      const { data: res, error } = await supabase.functions.invoke('send-sms', {
+        body: { recipients: recipients.map((m) => m.phone), message },
+      });
+      if (error) throw error;
+      if (res?.error) setResult({ ok: false, text: res.error });
+      else setResult({ ok: true, text: `Sent to ${res.sent} member(s).` });
+    } catch (err) {
+      setResult({ ok: false, text: err?.message || 'Could not reach the SMS service.' });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="top"><h1>Send SMS</h1></div>
+      <div className="panel">
+        <h2>Recipients</h2>
+        <div className="toolbar">
+          <select value={audience} onChange={(e) => setAudience(e.target.value)}>
+            <option value="active">All active members</option>
+            <option value="all">All members with a phone number</option>
+            <option value="group">By group</option>
+            <option value="custom">Choose individually</option>
+          </select>
+          {audience === 'group' && (
+            <select value={group} onChange={(e) => setGroup(e.target.value)}>
+              {groups.length ? groups.map((g) => <option key={g}>{g}</option>) : <option value="">No groups yet</option>}
+            </select>
+          )}
+        </div>
+        {audience === 'custom' && (
+          <>
+            <input placeholder="Search member…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 10 }} />
+            <div className="quicklist">
+              {shownForPick.map((m) => (
+                <button key={m.id} type="button" className={'quickrow' + (picked[m.id] ? ' present' : '')}
+                  onClick={() => setPicked((p) => ({ ...p, [m.id]: !p[m.id] }))}>
+                  <span>{m.name}</span><span className="badge">{picked[m.id] ? 'Selected' : m.phone}</span>
+                </button>
+              ))}
+              {!shownForPick.length && <div className="empty">No members with a phone number match.</div>}
+            </div>
+          </>
+        )}
+        <p className="muted sm" style={{ marginTop: 12 }}>{recipients.length} recipient(s) with a phone number on file.</p>
+      </div>
+      <div className="panel">
+        <h2>Message</h2>
+        <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Type your message…" style={{ minHeight: 120 }} />
+        <p className="muted sm">{message.length} characters · {segments || 0} SMS segment(s) per recipient (160 chars each).</p>
+        {result && <div className={result.ok ? 'muted' : 'err'} style={{ marginBottom: 10 }}>{result.text}</div>}
+        <button className="primary" disabled={sending} onClick={send}>{sending ? 'Sending…' : `Send to ${recipients.length}`}</button>
+      </div>
+    </>
+  );
+}
+
 /* ---------------- Reports ---------------- */
 export function Reports() {
   const { data } = useData();
@@ -211,6 +479,17 @@ export function Reports() {
   const att = Object.values(groups).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
 
   const exportable = TABLES.filter((t) => can(role, t, 'read'));
+
+  // Flags active members who haven't shown Present in the last 3 recorded Sunday Services —
+  // the kind of "who's fallen off" list a pastor actually needs, not just raw numbers.
+  const lastServices = [...new Set(data.attendance.filter((a) => a.status !== 'Visitor').map((a) => a.date + '|' + a.service))]
+    .sort().reverse().slice(0, 3);
+  const presentRecently = new Set(
+    data.attendance.filter((a) => a.status === 'Present' && lastServices.includes(a.date + '|' + a.service)).map((a) => a.person_name),
+  );
+  const missing = lastServices.length >= 2
+    ? data.members.filter((m) => m.status === 'Active' && !presentRecently.has(m.name))
+    : [];
 
   return (
     <>
@@ -248,6 +527,17 @@ export function Reports() {
             {!att.length && <tr><td colSpan="5" className="empty">No attendance recorded yet.</td></tr>}
           </tbody>
         </table></div>
+      </div>
+      <div className="panel">
+        <h2>Follow-up: active members missing the last {lastServices.length} recorded service(s)</h2>
+        {lastServices.length < 2 ? (
+          <p className="muted">Record at least two services in Attendance to see this list.</p>
+        ) : missing.length ? (
+          <div className="tablewrap"><table>
+            <thead><tr><th>Name</th><th>Phone</th><th>Group</th></tr></thead>
+            <tbody>{missing.map((m) => <tr key={m.id}><td><b>{m.name}</b></td><td>{m.phone || '—'}</td><td>{m.grp || '—'}</td></tr>)}</tbody>
+          </table></div>
+        ) : <div className="empty">No one is missing — everyone active showed up recently.</div>}
       </div>
       <div className="panel">
         <h2>Export to Excel (CSV)</h2>

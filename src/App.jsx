@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { configured } from './supabase';
 import { AuthProvider, useAuth, can } from './auth';
 import { DataProvider, useData } from './data';
-import { Dashboard, Members, Attendance, Giving, Departments, Events, Reports, Users, Settings } from './pages';
+import { Dashboard, Members, Attendance, QuickAttendance, Giving, Departments, Events, Reports, Users, Settings, SendSMS } from './pages';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
 
@@ -110,9 +110,11 @@ const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
   ['members', '👥 Members', Members, 'members'],
   ['attendance', '✅ Attendance', Attendance, 'attendance'],
+  ['quickattendance', '⚡ Quick Attendance', QuickAttendance, 'attendance'],
   ['giving', '💰 Giving', Giving, 'giving'],
   ['departments', '🏛 Departments', Departments, 'departments'],
   ['events', '📅 Events', Events, 'events'],
+  ['sms', '💬 Send SMS', SendSMS, 'members'],
   ['reports', '📈 Reports', Reports, null],
   ['users', '🔑 Users', Users, 'ADMIN'],
   ['settings', '⚙ Settings', Settings, null],
