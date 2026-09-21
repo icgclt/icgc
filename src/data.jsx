@@ -6,8 +6,16 @@ export const TABLES = [
   'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
 ];
 
-const read = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
-const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage full/blocked */ } };
+// Financial records use sessionStorage rather than localStorage. This keeps sensitive giving/welfare
+// data out of the persistent browser profile while still allowing offline work during the session.
+const SENSITIVE_TABLES = new Set([
+  'giving', 'offering_entries', 'member_contributions', 'welfare_transactions',
+]);
+const shouldPersist = (table) => !SENSITIVE_TABLES.has(table);
+const storageForTable = (table) => SENSITIVE_TABLES.has(table) ? sessionStorage : localStorage;
+const read = (k, d, storage = localStorage) => { try { const v = storage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+const write = (k, v, storage = localStorage) => { try { storage.setItem(k, JSON.stringify(v)); } catch { /* storage full/blocked */ } };
+const removeStored = (k, storage = localStorage) => { try { storage.removeItem(k); } catch { /* ignore */ } };
 const SERVER_FIELDS = ['created_at', 'updated_at', 'created_by'];
 
 const Ctx = createContext(null);
@@ -29,21 +37,41 @@ async function fetchAll(table) {
   return out;
 }
 
-// A "transient" failure means: try again later (no network, server down, token being refreshed).
-// Anything else (permission denied, constraint violation) is permanent and goes to the failed list.
 const isTransient = (error, status) =>
-  status === 0 || status >= 500 || !error.code || String(error.code).startsWith('PGRST3');
+  status === 0 || status >= 500 || !error?.code || String(error.code).startsWith('PGRST3');
 
+// Updates/deletes are conditional on the version the user originally edited. This prevents a
+// stale browser from silently overwriting another user's newer change.
 async function send(op) {
   try {
     if (op.op === 'delete') {
-      const { error, status } = await supabase.from(op.table).delete().eq('id', op.id);
+      let query = supabase.from(op.table).delete().eq('id', op.id);
+      if (op.expectedUpdatedAt) query = query.eq('updated_at', op.expectedUpdatedAt);
+      const { data, error, status } = await query.select('id');
+      if (!error && op.expectedUpdatedAt && data?.length === 0) {
+        return { error: { message: 'Conflict: this record was changed by another user.', code: 'CONFLICT' }, status: 409, conflict: true };
+      }
       return { error, status };
     }
+
     const row = { ...op.row };
     SERVER_FIELDS.forEach((k) => delete row[k]);
-    const { error, status } = await supabase.from(op.table).upsert(row);
-    return { error, status };
+
+    if (op.expectedUpdatedAt) {
+      const { data, error, status } = await supabase
+        .from(op.table)
+        .update(row)
+        .eq('id', op.row.id)
+        .eq('updated_at', op.expectedUpdatedAt)
+        .select('*');
+      if (!error && (!data || data.length === 0)) {
+        return { error: { message: 'Conflict: this record was changed by another user.', code: 'CONFLICT' }, status: 409, conflict: true };
+      }
+      return { error, status, data: data?.[0] };
+    }
+
+    const { data, error, status } = await supabase.from(op.table).upsert(row).select('*').single();
+    return { error, status, data };
   } catch (e) {
     return { error: { message: String(e?.message || e), code: '' }, status: 0 };
   }
@@ -52,12 +80,21 @@ async function send(op) {
 export function DataProvider({ uid, children }) {
   const ck = (t) => `cm:${uid}:cache:${t}`;
   const okey = `cm:${uid}:outbox`;
+  const skey = `cm:${uid}:sensitive-outbox`;
   const fkey = `cm:${uid}:failed`;
+  const sfkey = `cm:${uid}:sensitive-failed`;
+  const sensitiveStorage = typeof sessionStorage !== 'undefined' ? sessionStorage : localStorage;
 
-  const [data, setData] = useState(() => Object.fromEntries(TABLES.map((t) => [t, read(ck(t), [])])));
+  const [data, setData] = useState(() => Object.fromEntries(TABLES.map((t) => [t, read(ck(t), [], storageForTable(t))])));
   const dataRef = useRef(data);
-  const outboxRef = useRef(read(okey, []));
-  const failedRef = useRef(read(fkey, []));
+  const initialPersistentOutbox = read(okey, []);
+  const legacySensitive = initialPersistentOutbox.filter((op) => SENSITIVE_TABLES.has(op.table));
+  if (legacySensitive.length) {
+    write(skey, legacySensitive, sensitiveStorage);
+    write(okey, initialPersistentOutbox.filter((op) => !SENSITIVE_TABLES.has(op.table)));
+  }
+  const outboxRef = useRef([...read(okey, []), ...read(skey, [], sensitiveStorage)]);
+  const failedRef = useRef([...read(fkey, []), ...read(sfkey, [], sensitiveStorage)]);
   const [pending, setPending] = useState(outboxRef.current.length);
   const [failed, setFailed] = useState(failedRef.current);
   const [online, setOnline] = useState(navigator.onLine);
@@ -71,13 +108,20 @@ export function DataProvider({ uid, children }) {
 
   const commit = (table, rows) => {
     dataRef.current = { ...dataRef.current, [table]: rows };
-    write(ck(table), rows);
+    write(ck(table), rows, storageForTable(table));
     setData(dataRef.current);
   };
-  const setOutbox = (o) => { outboxRef.current = o; write(okey, o); setPending(o.length); };
-  const addFailed = (f) => { failedRef.current = [...failedRef.current, f]; write(fkey, failedRef.current); setFailed(failedRef.current); };
+  const persistOutbox = (o) => {
+    write(okey, o.filter((op) => !SENSITIVE_TABLES.has(op.table)));
+    write(skey, o.filter((op) => SENSITIVE_TABLES.has(op.table)), sensitiveStorage);
+  };
+  const persistFailed = (items) => {
+    write(fkey, items.filter((op) => !SENSITIVE_TABLES.has(op.table)));
+    write(sfkey, items.filter((op) => SENSITIVE_TABLES.has(op.table)), sensitiveStorage);
+  };
+  const setOutbox = (o) => { outboxRef.current = o; persistOutbox(o); setPending(o.length); };
+  const addFailed = (f) => { failedRef.current = [...failedRef.current, f]; persistFailed(failedRef.current); setFailed(failedRef.current); };
 
-  // Push queued changes (in order), then optionally pull fresh data from the server.
   async function sync(pull = false) {
     if (!navigator.onLine) return;
     if (busy.current) { again.current = true; pullAgain.current = pullAgain.current || pull; return; }
@@ -87,18 +131,32 @@ export function DataProvider({ uid, children }) {
       let hadFailure = false;
       while (outboxRef.current.length) {
         const op = outboxRef.current[0];
-        const { error, status } = await send(op);
+        const result = await send(op);
+        const { error, status } = result;
         if (error && isTransient(error, status)) { setSyncError(true); break; }
-        if (error) { hadFailure = true; addFailed({ ...op, error: error.message, at: new Date().toISOString() }); }
+        if (error) {
+          hadFailure = true;
+          addFailed({ ...op, error: error.message, at: new Date().toISOString(), conflict: !!result.conflict });
+        } else if (result.data && op.op === 'upsert') {
+          // Replace optimistic metadata with the server's trigger-generated timestamps.
+          const rows = dataRef.current[op.table] || [];
+          commit(op.table, rows.map((r) => r.id === op.row.id ? { ...r, ...result.data } : r));
+          // If the same record was edited more than once while offline, later queued edits
+          // should build on this successful server version instead of falsely conflicting.
+          outboxRef.current = outboxRef.current.map((queued, index) =>
+            index > 0 && queued.table === op.table && queued.row?.id === op.row.id
+              ? { ...queued, expectedUpdatedAt: result.data.updated_at }
+              : queued
+          );
+        }
         setOutbox(outboxRef.current.slice(1));
       }
       if ((pull || hadFailure) && outboxRef.current.length === 0) {
         const next = {};
         for (const t of TABLES) next[t] = await fetchAll(t);
-        // only replace local data if nothing new was queued while we were fetching
         if (outboxRef.current.length === 0) {
           dataRef.current = next;
-          TABLES.forEach((t) => write(ck(t), next[t]));
+          TABLES.forEach((t) => write(ck(t), next[t], storageForTable(t)));
           setData(next);
           setLastSync(new Date());
           setSyncError(false);
@@ -129,7 +187,9 @@ export function DataProvider({ uid, children }) {
     window.addEventListener('online', on);
     window.addEventListener('offline', off);
     document.addEventListener('visibilitychange', vis);
-    const iv = setInterval(() => { if (!document.hidden) syncRef.current(true); }, 60000);
+    // Full-table polling is expensive; five minutes is enough because manual sync and the
+    // online/visibility events still provide immediate refreshes.
+    const iv = setInterval(() => { if (!document.hidden) syncRef.current(true); }, 300000);
     syncRef.current(true);
     return () => {
       window.removeEventListener('online', on);
@@ -139,33 +199,36 @@ export function DataProvider({ uid, children }) {
     };
   }, []);
 
-  // Optimistic writes: update the screen + local cache immediately, queue the change, sync in the background.
   const save = (table, row) => {
     const list = dataRef.current[table];
-    const i = list.findIndex((x) => x.id === row.id);
-    commit(
-      table,
-      i >= 0
-        ? list.map((x) => (x.id === row.id ? { ...x, ...row } : x))
-        : [...list, { created_at: new Date().toISOString(), ...row }],
-    );
-    setOutbox([...outboxRef.current, { op: 'upsert', table, row }]);
+    const existing = list.find((x) => x.id === row.id);
+    const optimistic = existing
+      ? { ...existing, ...row }
+      : { created_at: new Date().toISOString(), ...row };
+    commit(table, existing ? list.map((x) => (x.id === row.id ? optimistic : x)) : [...list, optimistic]);
+    setOutbox([...outboxRef.current, {
+      op: 'upsert', table, row,
+      expectedUpdatedAt: existing?.updated_at || null,
+    }]);
     syncRef.current(false);
   };
 
   const remove = (table, id) => {
+    const existing = dataRef.current[table].find((x) => x.id === id);
     commit(table, dataRef.current[table].filter((x) => x.id !== id));
-    setOutbox([...outboxRef.current, { op: 'delete', table, id }]);
+    setOutbox([...outboxRef.current, { op: 'delete', table, id, expectedUpdatedAt: existing?.updated_at || null }]);
     syncRef.current(false);
   };
 
-  const discardFailed = () => { failedRef.current = []; write(fkey, []); setFailed([]); };
+  const discardFailed = () => { failedRef.current = []; write(fkey, []); write(sfkey, [], sensitiveStorage); setFailed([]); };
 
   const wipe = () => {
-    TABLES.forEach((t) => localStorage.removeItem(ck(t)));
-    localStorage.removeItem(okey);
-    localStorage.removeItem(fkey);
-    localStorage.removeItem(`cm:profile:${uid}`);
+    TABLES.forEach((t) => removeStored(ck(t), storageForTable(t)));
+    removeStored(okey);
+    removeStored(skey, sensitiveStorage);
+    removeStored(fkey);
+    removeStored(sfkey, sensitiveStorage);
+    removeStored(`cm:profile:${uid}`);
   };
 
   const value = {

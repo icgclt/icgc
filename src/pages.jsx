@@ -922,9 +922,9 @@ export function Settings() {
         {failed.length > 0 && (
           <>
             <h2 style={{ marginTop: 18 }}>Changes the server rejected ({failed.length})</h2>
-            <p className="muted">These were not saved (usually a permission problem). The list on screen has been refreshed from the server.</p>
+            <p className="muted">These changes were not applied. A conflict means another user changed the same record first; a permission or validation error means the server rejected the change.</p>
             <ul>
-              {failed.map((f, i) => <li key={i}>{f.op} in <b>{f.table}</b>: {f.error}</li>)}
+              {failed.map((f, i) => <li key={i}>{f.op} in <b>{f.table}</b>{f.conflict ? ' — conflict' : ''}: {f.error}</li>)}
             </ul>
             <button className="secondary" onClick={discardFailed}>Clear this list</button>
           </>
