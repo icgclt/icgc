@@ -7,6 +7,8 @@ import { money, today, downloadCSV, download, parseCSV, uuid } from './utils';
 
 const STATUS = ['Active', 'Inactive', 'Visitor'];
 const SERVICES = ['Sunday Service', 'Midweek Service', 'Prayer Meeting', 'Other'];
+const OFFERING_CATEGORIES = ['Main Offering', 'Project Offering', "Children's Offering", 'First Fruit', 'Weekday Offering', 'Donation', 'Thanksgiving', 'Pledges'];
+const HEADCOUNT_CATEGORIES = ['Children Boys', 'Children Girls', 'Youth Boys', 'Youth Girls', 'Adult Men', 'Adult Women'];
 const badge = (v) => <span className="badge">{v}</span>;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -454,12 +456,276 @@ export function SendSMS() {
   );
 }
 
+/* ---------------- Offerings (detailed categories) ---------------- */
+export function Offerings() {
+  return (
+    <Crud
+      table="offering_entries" title="Offerings" noun="offering entry"
+      sortKey="date" sortDir="desc" searchKeys={['note']}
+      filters={[{ key: 'category', label: 'All categories', options: OFFERING_CATEGORIES }]}
+      defaults={{ date: today(), category: 'Main Offering' }}
+      fields={[
+        { key: 'date', label: 'Date', type: 'date', required: true },
+        { key: 'category', label: 'Category', type: 'select', options: OFFERING_CATEGORIES, required: true },
+        { key: 'amount', label: 'Amount (GHS)', type: 'number', step: '0.01', gt: -1, required: true },
+        { key: 'note', label: 'Note' },
+      ]}
+      columns={[
+        { label: 'Date', key: 'date' },
+        { label: 'Category', key: 'category' },
+        { label: 'Amount', render: (r) => <b>{money(r.amount)}</b> },
+        { label: 'Note', key: 'note' },
+      ]}
+    />
+  );
+}
+
+/* ---------------- First Fruit / Welfare Dues: shared monthly grid ---------------- */
+// Both funds follow the identical "member x 12 months" pattern from the old workbooks —
+// one editable grid, keyed by which roster and which fund it writes to.
+function ContributionsGrid({ fund, roster, title }) {
+  const { data, save } = useData();
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [q, setQ] = useState('');
+  const [edits, setEdits] = useState({}); // `${name}|${month}` -> string value
+
+  const existing = useMemo(() => {
+    const map = new Map();
+    data.member_contributions.forEach((c) => { if (c.fund === fund && c.year === year) map.set(c.person_name + '|' + c.month, c); });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.member_contributions, fund, year]);
+
+  useEffect(() => { setEdits({}); }, [year, fund]);
+
+  const shown = roster.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()));
+
+  const valueFor = (name, month) => {
+    const k = name + '|' + month;
+    if (k in edits) return edits[k];
+    const rec = existing.get(k);
+    return rec ? String(rec.amount) : '';
+  };
+  const setValue = (name, month, v) => setEdits((e) => ({ ...e, [name + '|' + month]: v }));
+  const rowTotal = (name) => MONTHS.reduce((s, _, i) => s + (Number(valueFor(name, i + 1)) || 0), 0);
+  const monthTotal = (month) => shown.reduce((s, m) => s + (Number(valueFor(m.name, month)) || 0), 0);
+  const grandTotal = shown.reduce((s, m) => s + rowTotal(m.name), 0);
+
+  const saveAll = () => {
+    let n = 0;
+    Object.entries(edits).forEach(([k, v]) => {
+      const [name, monthStr] = k.split('|');
+      const month = Number(monthStr);
+      const amount = Number(v) || 0;
+      const rec = existing.get(k);
+      if (!rec && amount === 0) return;
+      save('member_contributions', { id: rec ? rec.id : uuid(), fund, person_name: name, year, month, amount });
+      n++;
+    });
+    setEdits({});
+    alert(n ? `Saved ${n} entr${n === 1 ? 'y' : 'ies'}.` : 'No changes to save.');
+  };
+
+  return (
+    <>
+      <div className="top">
+        <h1>{title}</h1>
+        <button className="primary" onClick={saveAll}>Save changes</button>
+      </div>
+      <div className="panel">
+        <div className="toolbar">
+          <div className="fld"><small>Year</small><input type="number" value={year} style={{ width: 90 }} onChange={(e) => setYear(Number(e.target.value) || year)} /></div>
+          <input placeholder="Search member…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="tablewrap">
+          <table className="gridtable">
+            <thead><tr><th>Name</th>{MONTHS.map((m) => <th key={m}>{m}</th>)}<th>Total</th></tr></thead>
+            <tbody>
+              {shown.map((m) => (
+                <tr key={m.id}>
+                  <td><b>{m.name}</b></td>
+                  {MONTHS.map((_, i) => (
+                    <td key={i}><input type="number" step="0.01" className="cellinput" value={valueFor(m.name, i + 1)} onChange={(e) => setValue(m.name, i + 1, e.target.value)} /></td>
+                  ))}
+                  <td><b>{money(rowTotal(m.name))}</b></td>
+                </tr>
+              ))}
+              {!shown.length && <tr><td colSpan={14} className="empty">No members match.</td></tr>}
+            </tbody>
+            {shown.length > 0 && (
+              <tfoot><tr><td><b>Monthly total</b></td>{MONTHS.map((_, i) => <td key={i}><b>{money(monthTotal(i + 1))}</b></td>)}<td><b>{money(grandTotal)}</b></td></tr></tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function FirstFruit() {
+  const { data } = useData();
+  const roster = [...data.members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name));
+  return <ContributionsGrid fund="First Fruit" roster={roster} title="First Fruit Register" />;
+}
+
+export function WelfareDues() {
+  const { data } = useData();
+  const roster = [...data.welfare_members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name));
+  return <ContributionsGrid fund="Welfare Dues" roster={roster} title="Welfare Dues" />;
+}
+
+/* ---------------- Welfare Fund ---------------- */
+export function WelfareMembers() {
+  return (
+    <Crud
+      table="welfare_members" title="Welfare Members" noun="welfare member"
+      sortKey="name" searchKeys={['name', 'ac_no', 'phone', 'next_of_kin']}
+      filters={[{ key: 'status', label: 'All statuses', options: ['Active', 'Inactive'] }]}
+      defaults={{ status: 'Active' }}
+      fields={[
+        { key: 'ac_no', label: 'AC/NO' },
+        { key: 'name', label: 'Full name', required: true },
+        { key: 'sex', label: 'Sex', type: 'select', options: ['M', 'F'] },
+        { key: 'date_registered', label: 'Date registered', type: 'date' },
+        { key: 'phone', label: 'Phone' },
+        { key: 'department', label: 'Department' },
+        { key: 'next_of_kin', label: 'Next of kin' },
+        { key: 'registration_dues', label: 'Registration dues (GHS)', type: 'number', step: '0.01', gt: -1 },
+        { key: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'], required: true },
+      ]}
+      columns={[
+        { label: 'AC/NO', key: 'ac_no' },
+        { label: 'Name', render: (m) => <b>{m.name}</b> },
+        { label: 'Sex', key: 'sex' },
+        { label: 'Phone', key: 'phone' },
+        { label: 'Next of kin', key: 'next_of_kin' },
+        { label: 'Status', render: (m) => badge(m.status) },
+      ]}
+    />
+  );
+}
+
+export function WelfareFund() {
+  const { data } = useData();
+  const income = data.welfare_transactions.filter((t) => t.kind === 'Income').reduce((s, t) => s + Number(t.amount), 0);
+  const expenditure = data.welfare_transactions.filter((t) => t.kind === 'Expenditure').reduce((s, t) => s + Number(t.amount), 0);
+  return (
+    <>
+      <div className="top"><h1>Welfare Fund</h1></div>
+      <div className="cards">
+        <div className="card"><div className="label">Total income</div><div className="num" style={{ fontSize: 22 }}>{money(income)}</div></div>
+        <div className="card"><div className="label">Total expenditure</div><div className="num" style={{ fontSize: 22 }}>{money(expenditure)}</div></div>
+        <div className="card"><div className="label">Balance</div><div className="num" style={{ fontSize: 22 }}>{money(income - expenditure)}</div></div>
+      </div>
+      <Crud
+        table="welfare_transactions" title="Transactions" noun="transaction"
+        sortKey="date" sortDir="desc" searchKeys={['item', 'note']}
+        filters={[{ key: 'kind', label: 'All', options: ['Income', 'Expenditure'] }]}
+        defaults={{ date: today(), kind: 'Income' }}
+        fields={[
+          { key: 'date', label: 'Date', type: 'date', required: true },
+          { key: 'kind', label: 'Type', type: 'select', options: ['Income', 'Expenditure'], required: true },
+          { key: 'item', label: 'Item (e.g. Contribution, Offering, Donation, T&T)', required: true },
+          { key: 'amount', label: 'Amount (GHS)', type: 'number', step: '0.01', gt: -1, required: true },
+          { key: 'note', label: 'Note (e.g. transport breakdown, purpose)', type: 'textarea', full: true },
+        ]}
+        columns={[
+          { label: 'Date', key: 'date' },
+          { label: 'Type', render: (r) => badge(r.kind) },
+          { label: 'Item', key: 'item' },
+          { label: 'Amount', render: (r) => <b>{money(r.amount)}</b> },
+          { label: 'Note', key: 'note' },
+        ]}
+      />
+    </>
+  );
+}
+
+/* ---------------- Headcount Attendance (by demographic category) ---------------- */
+export function HeadcountAttendance() {
+  const { data, save } = useData();
+  const [date, setDate] = useState(today());
+  const [service, setService] = useState('Sunday Service');
+  const [edits, setEdits] = useState({});
+
+  const existing = useMemo(() => {
+    const map = new Map();
+    data.attendance_headcount.forEach((r) => { if (r.date === date && r.service === service) map.set(r.category, r); });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.attendance_headcount, date, service]);
+
+  useEffect(() => { setEdits({}); }, [date, service]);
+
+  const valueFor = (cat) => (cat in edits ? edits[cat] : String(existing.get(cat)?.count ?? ''));
+  const total = HEADCOUNT_CATEGORIES.reduce((s, c) => s + (Number(valueFor(c)) || 0), 0);
+
+  const saveAll = () => {
+    let n = 0;
+    HEADCOUNT_CATEGORIES.forEach((cat) => {
+      if (!(cat in edits)) return;
+      const count = Number(edits[cat]) || 0;
+      const rec = existing.get(cat);
+      save('attendance_headcount', { id: rec ? rec.id : uuid(), date, service, category: cat, count });
+      n++;
+    });
+    setEdits({});
+    alert(n ? `Saved headcount for ${n} categor${n === 1 ? 'y' : 'ies'}. Total: ${total}.` : 'No changes to save.');
+  };
+
+  const history = [...new Set(data.attendance_headcount.map((r) => r.date + '|' + r.service))]
+    .sort().reverse().slice(0, 10)
+    .map((k) => {
+      const [d, s] = k.split('|');
+      const rows = data.attendance_headcount.filter((r) => r.date === d && r.service === s);
+      const t = rows.reduce((sum, r) => sum + r.count, 0);
+      return { date: d, service: s, total: t };
+    });
+
+  return (
+    <>
+      <div className="top">
+        <h1>Headcount Attendance</h1>
+        <button className="primary" onClick={saveAll}>Save headcount</button>
+      </div>
+      <div className="panel">
+        <div className="toolbar">
+          <div className="fld"><small>Date</small><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+          <div className="fld"><small>Service</small>
+            <select value={service} onChange={(e) => setService(e.target.value)}>{SERVICES.map((s) => <option key={s}>{s}</option>)}</select>
+          </div>
+        </div>
+        <div className="grid2">
+          {HEADCOUNT_CATEGORIES.map((cat) => (
+            <div className="fld" key={cat}>
+              <small>{cat}</small>
+              <input type="number" min="0" value={valueFor(cat)} onChange={(e) => setEdits((ed) => ({ ...ed, [cat]: e.target.value }))} />
+            </div>
+          ))}
+        </div>
+        <p className="muted sm" style={{ marginTop: 12 }}>Total for this service: <b>{total}</b></p>
+      </div>
+      <div className="panel">
+        <h2>Recent tallies</h2>
+        <div className="tablewrap"><table>
+          <thead><tr><th>Date</th><th>Service</th><th>Total</th></tr></thead>
+          <tbody>
+            {history.map((r) => <tr key={r.date + r.service}><td>{r.date}</td><td>{r.service}</td><td>{r.total}</td></tr>)}
+            {!history.length && <tr><td colSpan="3" className="empty">No headcounts recorded yet.</td></tr>}
+          </tbody>
+        </table></div>
+      </div>
+    </>
+  );
+}
+
 /* ---------------- Reports ---------------- */
 export function Reports() {
   const { data } = useData();
   const { role } = useAuth();
   const showGiving = can(role, 'giving', 'read');
-  const years = [...new Set(data.giving.map((g) => String(g.date).slice(0, 4)))].sort().reverse();
+  const showOfferings = can(role, 'offering_entries', 'read');
+  const years = [...new Set([...data.giving.map((g) => String(g.date).slice(0, 4)), ...data.offering_entries.map((o) => String(o.date).slice(0, 4))])].sort().reverse();
   const [year, setYear] = useState('');
   const y = year || years[0] || String(new Date().getFullYear());
 
@@ -469,6 +735,13 @@ export function Reports() {
   const byMonth = Array(12).fill(0);
   yg.forEach((g) => { byMonth[Number(String(g.date).slice(5, 7)) - 1] += Number(g.amount); });
   const total = yg.reduce((a, g) => a + Number(g.amount), 0);
+
+  const yo = data.offering_entries.filter((o) => String(o.date).startsWith(y));
+  const byCategory = {};
+  yo.forEach((o) => { byCategory[o.category] = (byCategory[o.category] || 0) + Number(o.amount); });
+  const offByMonth = Array(12).fill(0);
+  yo.forEach((o) => { offByMonth[Number(String(o.date).slice(5, 7)) - 1] += Number(o.amount); });
+  const offTotal = yo.reduce((a, o) => a + Number(o.amount), 0);
 
   const groups = {};
   data.attendance.forEach((a) => {
@@ -514,6 +787,30 @@ export function Reports() {
             <div className="tablewrap"><table>
               <thead><tr><th>Month</th><th>Amount</th></tr></thead>
               <tbody>{byMonth.map((v, i) => <tr key={i}><td>{MONTHS[i]}</td><td>{money(v)}</td></tr>)}</tbody>
+            </table></div>
+          </div>
+        </div>
+      )}
+      {showOfferings && (
+        <div className="panel">
+          <div className="top" style={{ marginBottom: 10 }}>
+            <h2 style={{ margin: 0 }}>Offerings summary</h2>
+            <select value={y} onChange={(e) => setYear(e.target.value)}>
+              {(years.length ? years : [y]).map((x) => <option key={x}>{x}</option>)}
+            </select>
+          </div>
+          <p><b>Total {y}: {money(offTotal)}</b></p>
+          <div className="grid2">
+            <div className="tablewrap"><table>
+              <thead><tr><th>Category</th><th>Amount</th></tr></thead>
+              <tbody>
+                {OFFERING_CATEGORIES.map((c) => <tr key={c}><td>{c}</td><td>{money(byCategory[c] || 0)}</td></tr>)}
+                {!yo.length && <tr><td colSpan="2" className="empty">No offerings recorded in {y}.</td></tr>}
+              </tbody>
+            </table></div>
+            <div className="tablewrap"><table>
+              <thead><tr><th>Month</th><th>Amount</th></tr></thead>
+              <tbody>{offByMonth.map((v, i) => <tr key={i}><td>{MONTHS[i]}</td><td>{money(v)}</td></tr>)}</tbody>
             </table></div>
           </div>
         </div>

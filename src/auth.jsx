@@ -10,11 +10,16 @@ const READ_ALL = ['admin', 'finance', 'secretary', 'viewer'];
 // Mirrors the row-level security policies in supabase/schema.sql (the database is the real enforcer;
 // this only decides which buttons and pages to show).
 export const PERMS = {
-  members:     { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
-  attendance:  { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
-  departments: { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
-  events:      { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
-  giving:      { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
+  members:                { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  attendance:              { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  attendance_headcount:    { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  departments:             { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  events:                  { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  welfare_members:         { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  giving:                  { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
+  offering_entries:        { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
+  member_contributions:    { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
+  welfare_transactions:    { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
 };
 export const can = (role, table, action) => PERMS[table]?.[action]?.includes(role) || false;
 

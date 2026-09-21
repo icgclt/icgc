@@ -1,7 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
 
-export const TABLES = ['members', 'attendance', 'giving', 'departments', 'events'];
+export const TABLES = [
+  'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
+  'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
+];
 
 const read = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage full/blocked */ } };

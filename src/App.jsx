@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { configured } from './supabase';
 import { AuthProvider, useAuth, can } from './auth';
 import { DataProvider, useData } from './data';
-import { Dashboard, Members, Attendance, QuickAttendance, Giving, Departments, Events, Reports, Users, Settings, SendSMS } from './pages';
+import {
+  Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings,
+  FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
+  WelfareMembers, WelfareDues, WelfareFund,
+} from './pages';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
 
@@ -111,7 +115,13 @@ const NAV = [
   ['members', '👥 Members', Members, 'members'],
   ['attendance', '✅ Attendance', Attendance, 'attendance'],
   ['quickattendance', '⚡ Quick Attendance', QuickAttendance, 'attendance'],
+  ['headcount', '🔢 Headcount Attendance', HeadcountAttendance, 'attendance_headcount'],
   ['giving', '💰 Giving', Giving, 'giving'],
+  ['offerings', '🧺 Offerings', Offerings, 'offering_entries'],
+  ['firstfruit', '🌱 First Fruit', FirstFruit, 'member_contributions'],
+  ['welfaremembers', '🤝 Welfare Members', WelfareMembers, 'welfare_members'],
+  ['welfaredues', '🤝 Welfare Dues', WelfareDues, 'member_contributions'],
+  ['welfarefund', '🤝 Welfare Fund', WelfareFund, 'welfare_transactions'],
   ['departments', '🏛 Departments', Departments, 'departments'],
   ['events', '📅 Events', Events, 'events'],
   ['sms', '💬 Send SMS', SendSMS, 'members'],
