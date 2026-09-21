@@ -209,3 +209,8 @@ grant select, update on public.profiles to authenticated;
 grant select, insert, update, delete on public.members, public.attendance, public.giving,
               public.departments, public.events to authenticated;
 grant select on public.audit_log to authenticated;
+
+-- Prevent duplicate attendance for the same person, service and date.
+-- If applying to an existing database, run the cleanup/unique-index migration instead.
+create unique index if not exists attendance_date_service_person_unique
+  on public.attendance (date, service, lower(trim(person_name)));
