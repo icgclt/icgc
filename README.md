@@ -95,3 +95,15 @@ The app now includes visitor follow-up, ministry groups, follow-up cases, prayer
 
 ## Suggested next steps
 Cashbook and weekly cash report, fixed assets with depreciation, member photos, SMS reminders, multiple branches, attendance by member ID/QR code, event registration, child check-in, mobile-money payment integration and a dedicated member-facing portal.
+
+## Stage 6: Family, Children and Check-in
+
+Run `supabase/migration_06_family_children.sql` after the previous migrations.
+
+New modules:
+- Families / households
+- Children records
+- Secure child check-in and pickup code
+- Member ID check-in using the existing member code
+
+The member code is stable and suitable for printing on a membership card. A camera-based QR reader can be added later without changing the attendance data model.
