@@ -31,9 +31,22 @@ Open the URL shown (http://localhost:5173).
 
 ### 3. Create the first account
 Click **Sign up** and create your account. **The first account becomes `admin` automatically.**
-Everyone after that signs up as `pending`; approve them under **Users** and give them a role.
+Everyone after that signs up as `pending`, or the admin creates their account under **Users > Create user** with a role already chosen.
 
-### 4. Deploy
+### 4. Deploy the user-management function (needed for Create user / Reset password / Delete user)
+Creating accounts and resetting other people's passwords needs Supabase's secret key, so it runs in an Edge Function
+(the secret key never goes in the app). One time, with the Supabase CLI:
+```bash
+supabase login
+supabase link --project-ref YOUR-PROJECT-REF
+supabase functions deploy admin-users
+```
+Nothing else to configure. Only signed-in **admins** can use it.
+
+For the **Forgot password?** email link on the login page: Supabase dashboard > Authentication > URL Configuration,
+set **Site URL** to your deployed app address and add it under **Redirect URLs**.
+
+### 5. Deploy
 `npm run build` produces the `dist/` folder. Host it on any static host (Netlify, Vercel, Cloudflare Pages, GitHub Pages).
 Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_CHURCH_NAME` as **build** environment variables on the host.
 Serve over https so the app can be installed on phones ("Add to Home screen") and work offline.
@@ -62,10 +75,12 @@ Deleting is admin-only in every module.
 - Consider turning **off** public sign-ups (Authentication > Sign In / Providers) once your staff have accounts, then add
   people from the Supabase dashboard (Authentication > Users). New users still start as `pending`.
 - Member and giving data is personal/financial: use strong passwords and give people the lowest role they need.
-- Password reset: use the Supabase dashboard (Authentication > Users) for now; a self-service reset page is not included.
+- Passwords: an admin can reset anyone's password from **Users**; everyone can change their own under **Settings**;
+  anyone who is locked out can use **Forgot password?** on the login page (needs email delivery working in Supabase).
 
 ## Project layout
 ```
+supabase/functions/admin-users   create user / reset password / delete user (admin only)
 supabase/schema.sql   tables, roles, RLS policies, audit trigger
 src/data.jsx          local cache + offline queue + sync
 src/auth.jsx          login session + role permissions
