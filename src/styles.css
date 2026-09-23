@@ -9,6 +9,10 @@ code,pre{background:#eef2f6;border-radius:6px;padding:2px 5px;font-size:13px}pre
 .brand{font-size:19px;font-weight:800;padding:10px 8px 22px}.brand small{display:block;font-size:11px;font-weight:400;opacity:.7;margin-top:4px}
 .nav button{width:100%;border:0;background:transparent;color:#d9e2ec;text-align:left;padding:12px;border-radius:8px;margin:3px 0;font-size:14px;cursor:pointer}
 .nav button.active,.nav button:hover{background:var(--nav2);color:#fff}
+.nav .grouphead{display:flex;justify-content:space-between;align-items:center}
+.nav .grouphead.hasactive{color:#fff;font-weight:600}
+.chev{transition:transform .15s;font-size:12px}.chev.open{transform:rotate(90deg)}
+.nav button.sub{padding:9px 12px 9px 34px;font-size:13px}
 .main{margin-left:245px;width:calc(100% - 245px);padding:24px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:10px}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:10px}.top h1{margin:0;font-size:26px}

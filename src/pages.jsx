@@ -851,10 +851,91 @@ export function Reports() {
 }
 
 /* ---------------- Users (admin only) ---------------- */
+// Calls the admin-users edge function (needs the service key, so it can't run in the browser).
+async function adminCall(body) {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body });
+  if (error) {
+    let m = error.message;
+    try { const j = await error.context?.json?.(); if (j?.error) m = j.error; } catch { /* keep default */ }
+    if (/Failed to send|fetch/i.test(m)) m = 'Could not reach the server. Check your internet connection (and that the admin-users function is deployed).';
+    throw new Error(m);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+const randomPassword = () => {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const a = crypto.getRandomValues(new Uint32Array(10));
+  return Array.from(a, (n) => chars[n % chars.length]).join('');
+};
+
+function UserDialog({ mode, target, onClose, onDone }) {
+  // mode: 'create' | 'reset'
+  const [f, setF] = useState({ full_name: '', email: '', role: 'viewer', password: randomPassword() });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState(null);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  async function submit(e) {
+    e.preventDefault();
+    setErr('');
+    if (f.password.length < 6) return setErr('Password must be at least 6 characters.');
+    setBusy(true);
+    try {
+      if (mode === 'create') await adminCall({ action: 'create', ...f });
+      else await adminCall({ action: 'reset_password', user_id: target.id, password: f.password });
+      setDone({ email: mode === 'create' ? f.email : target.email, password: f.password });
+      onDone();
+    } catch (ex) { setErr(ex.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="modal" onClick={onClose}>
+      <div className="modalbox" onClick={(e) => e.stopPropagation()}>
+        <div className="modalhead"><h2>{mode === 'create' ? 'Create user account' : 'Reset password'}</h2><button className="x" onClick={onClose}>×</button></div>
+        {done ? (
+          <>
+            <p>{mode === 'create' ? 'Account created.' : 'Password changed.'} Give these details to the user (they can change the password later in Settings):</p>
+            <pre>{`Email:    ${done.email}\nPassword: ${done.password}`}</pre>
+            <div className="btnrow">
+              <button className="secondary" onClick={() => navigator.clipboard?.writeText(`Email: ${done.email}\nPassword: ${done.password}`)}>Copy</button>
+              <button className="primary" onClick={onClose}>Done</button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submit}>
+            {mode === 'reset' && <p className="muted">New password for <b>{target.full_name || target.email}</b> ({target.email}).</p>}
+            <div className="formgrid">
+              {mode === 'create' && <>
+                <div className="fld"><small>Full name</small><input value={f.full_name} onChange={set('full_name')} required /></div>
+                <div className="fld"><small>Email</small><input type="email" value={f.email} onChange={set('email')} required /></div>
+                <div className="fld"><small>Role</small>
+                  <select value={f.role} onChange={set('role')}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
+                </div>
+              </>}
+              <div className="fld"><small>{mode === 'create' ? 'Password' : 'New password'}</small>
+                <div className="btnrow" style={{ flexWrap: 'nowrap' }}>
+                  <input value={f.password} onChange={set('password')} required style={{ flex: 1 }} />
+                  <button type="button" className="secondary" onClick={() => setF({ ...f, password: randomPassword() })}>Generate</button>
+                </div>
+              </div>
+            </div>
+            {err && <div className="err" style={{ margin: '10px 0' }}>{err}</div>}
+            <div style={{ marginTop: 14 }}><button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'create' ? 'Create account' : 'Reset password'}</button></div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Users() {
   const { user } = useAuth();
   const [rows, setRows] = useState(null);
   const [msg, setMsg] = useState('');
+  const [dialog, setDialog] = useState(null); // { mode, target }
 
   const load = async () => {
     const { data, error } = await supabase.from('profiles').select('*').order('created_at');
@@ -868,17 +949,28 @@ export function Users() {
     else load();
   };
 
+  const remove = async (p) => {
+    if (!confirm(`Delete the account for ${p.full_name || p.email}? They will no longer be able to sign in. Records they created are kept.`)) return;
+    try { await adminCall({ action: 'delete', user_id: p.id }); load(); } catch (ex) { setMsg(ex.message); }
+  };
+
   return (
     <>
-      <div className="top"><h1>Users</h1><button className="secondary" onClick={load}>Refresh</button></div>
+      <div className="top">
+        <h1>Users</h1>
+        <div className="btnrow">
+          <button className="secondary" onClick={load}>Refresh</button>
+          <button className="primary" onClick={() => setDialog({ mode: 'create' })}>+ Create user</button>
+        </div>
+      </div>
       <div className="panel">
         <p className="muted">
-          New sign-ups appear as <b>pending</b> and see nothing until you give them a role.
+          Create accounts here and choose each person's role, or approve people who signed up themselves (they show as <b>pending</b>).
           <br /><b>admin</b>: everything · <b>finance</b>: giving + read others · <b>secretary</b>: members, attendance, departments, events · <b>viewer</b>: read-only (no giving).
         </p>
         {msg && <div className="err">{msg}</div>}
         <div className="tablewrap"><table>
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
           <tbody>
             {(rows || []).map((p) => (
               <tr key={p.id}>
@@ -890,18 +982,47 @@ export function Users() {
                   </select>
                 </td>
                 <td>{String(p.created_at).slice(0, 10)}</td>
+                <td className="actions">
+                  <button className="secondary" onClick={() => setDialog({ mode: 'reset', target: p })}>Reset password</button>
+                  {p.id !== user.id && <button className="danger" onClick={() => remove(p)}>Delete</button>}
+                </td>
               </tr>
             ))}
-            {rows && !rows.length && <tr><td colSpan="4" className="empty">No users.</td></tr>}
-            {!rows && <tr><td colSpan="4" className="empty">Loading…</td></tr>}
+            {rows && !rows.length && <tr><td colSpan="5" className="empty">No users.</td></tr>}
+            {!rows && <tr><td colSpan="5" className="empty">Loading…</td></tr>}
           </tbody>
         </table></div>
       </div>
+      {dialog && <UserDialog {...dialog} onClose={() => setDialog(null)} onDone={load} />}
     </>
   );
 }
 
 /* ---------------- Settings ---------------- */
+function ChangePassword() {
+  const { updatePassword } = useAuth();
+  const [p1, setP1] = useState('');
+  const [p2, setP2] = useState('');
+  const [msg, setMsg] = useState(null);
+  async function submit(e) {
+    e.preventDefault();
+    if (p1.length < 6) return setMsg({ bad: true, t: 'Password must be at least 6 characters.' });
+    if (p1 !== p2) return setMsg({ bad: true, t: 'The two passwords do not match.' });
+    const { error } = await updatePassword(p1);
+    if (error) setMsg({ bad: true, t: error.message });
+    else { setMsg({ t: 'Password changed.' }); setP1(''); setP2(''); }
+  }
+  return (
+    <form onSubmit={submit} style={{ marginTop: 14, maxWidth: 360 }}>
+      <h2>Change password</h2>
+      <label>New password</label><input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" style={{ width: '100%', marginBottom: 10 }} />
+      <label>Confirm new password</label><input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" style={{ width: '100%', marginBottom: 10 }} />
+      {msg && <div className={msg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{msg.t}</div>}
+      <button className="primary">Update password</button>
+    </form>
+  );
+}
+
 export function Settings() {
   const { user, profile } = useAuth();
   const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed } = useData();
@@ -911,6 +1032,7 @@ export function Settings() {
       <div className="panel">
         <h2>Account</h2>
         <p><b>{profile?.full_name || user.email}</b><br /><span className="muted">{user.email} · role: {profile?.role}</span></p>
+        <ChangePassword />
       </div>
       <div className="panel">
         <h2>Sync</h2>

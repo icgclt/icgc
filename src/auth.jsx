@@ -27,6 +27,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [recovery, setRecovery] = useState(false); // true while the user is setting a new password from an emailed link
 
   const loadProfile = useCallback(async (user) => {
     if (!user) { setProfile(null); return; }
@@ -51,7 +52,8 @@ export function AuthProvider({ children }) {
       await loadProfile(data.session?.user);
       if (alive) setLoading(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
       setSession(s);
       // defer: calling supabase inside this callback can deadlock the auth client
       setTimeout(() => loadProfile(s?.user), 0);
@@ -65,10 +67,19 @@ export function AuthProvider({ children }) {
     profile,
     role: profile?.role,
     loading,
+    recovery,
     signIn: (email, password) => supabase.auth.signInWithPassword({ email, password }),
     signUp: (email, password, fullName) =>
       supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } }),
     signOut: () => supabase.auth.signOut(),
+    // emails a reset link (used by 'Forgot password?' on the login page)
+    sendResetEmail: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
+    // sets a new password for the signed-in user (recovery link or Settings > Change password)
+    updatePassword: async (password) => {
+      const res = await supabase.auth.updateUser({ password });
+      if (!res.error) setRecovery(false);
+      return res;
+    },
     refreshProfile: () => loadProfile(session?.user),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

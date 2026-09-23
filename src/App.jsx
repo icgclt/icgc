@@ -20,9 +20,10 @@ export default function App() {
 }
 
 function Gate() {
-  const { loading, user, profile, role } = useAuth();
+  const { loading, user, profile, role, recovery } = useAuth();
   if (loading) return <div className="login"><div className="loginbox"><h1>{CHURCH}</h1><p className="muted">Loading…</p></div></div>;
   if (!user) return <Login />;
+  if (recovery) return <SetNewPassword />;
   if (!profile || role === 'pending') return <Pending />;
   return (
     <DataProvider key={user.id} uid={user.id}>
@@ -47,7 +48,7 @@ VITE_CHURCH_NAME=Your Church`}</pre>
 }
 
 function Login() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, sendResetEmail } = useAuth();
   const [mode, setMode] = useState('in');
   const [f, setF] = useState({ name: '', email: '', password: '' });
   const [msg, setMsg] = useState('');
@@ -62,6 +63,9 @@ function Login() {
       if (mode === 'in') {
         const { error } = await signIn(f.email.trim(), f.password);
         if (error) setMsg(error.message);
+      } else if (mode === 'forgot') {
+        const { error } = await sendResetEmail(f.email.trim());
+        setMsg(error ? error.message : 'If that email has an account, a reset link has been sent. Open it on this device.');
       } else {
         if (f.password.length < 6) { setMsg('Password must be at least 6 characters.'); return; }
         const { data, error } = await signUp(f.email.trim(), f.password, f.name.trim());
@@ -79,17 +83,48 @@ function Login() {
     <div className="login">
       <form className="loginbox" onSubmit={submit}>
         <h1>⛪ {CHURCH}</h1>
-        <p className="muted">{mode === 'in' ? 'Sign in to continue.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
+        <p className="muted">{mode === 'in' ? 'Sign in to continue.' : mode === 'forgot' ? 'Enter your email and we will send you a link to reset your password.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
         {mode === 'up' && <><label>Full name</label><input value={f.name} onChange={set('name')} required /></>}
         <label>Email</label><input type="email" value={f.email} onChange={set('email')} required autoComplete="email" />
-        <label>Password</label><input type="password" value={f.password} onChange={set('password')} required autoComplete={mode === 'in' ? 'current-password' : 'new-password'} />
+        {mode !== 'forgot' && <><label>Password</label><input type="password" value={f.password} onChange={set('password')} required autoComplete={mode === 'in' ? 'current-password' : 'new-password'} /></>}
         {msg && <div className="err" style={{ marginBottom: 12 }}>{msg}</div>}
-        <button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : 'Create account'}</button>
+        <button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : mode === 'forgot' ? 'Send reset link' : 'Create account'}</button>
+        {mode === 'in' && <p style={{ textAlign: 'center', marginBottom: 0 }}><a href="#" onClick={(e) => { e.preventDefault(); setMsg(''); setMode('forgot'); }}>Forgot password?</a></p>}
         <p style={{ textAlign: 'center', marginBottom: 0 }}>
           <a href="#" onClick={(e) => { e.preventDefault(); setMsg(''); setMode(mode === 'in' ? 'up' : 'in'); }}>
-            {mode === 'in' ? 'Need an account? Sign up' : 'Have an account? Sign in'}
+            {mode === 'in' ? 'Need an account? Sign up' : 'Back to sign in'}
           </a>
         </p>
+      </form>
+    </div>
+  );
+}
+
+function SetNewPassword() {
+  const { updatePassword, signOut } = useAuth();
+  const [p1, setP1] = useState('');
+  const [p2, setP2] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function submit(e) {
+    e.preventDefault();
+    if (p1.length < 6) return setMsg('Password must be at least 6 characters.');
+    if (p1 !== p2) return setMsg('The two passwords do not match.');
+    setBusy(true);
+    const { error } = await updatePassword(p1);
+    setBusy(false);
+    if (error) setMsg(error.message); // on success the app continues to the dashboard
+  }
+  return (
+    <div className="login">
+      <form className="loginbox" onSubmit={submit}>
+        <h1>Set a new password</h1>
+        <label>New password</label><input type="password" value={p1} onChange={(e) => setP1(e.target.value)} required autoComplete="new-password" />
+        <label>Confirm new password</label><input type="password" value={p2} onChange={(e) => setP2(e.target.value)} required autoComplete="new-password" />
+        {msg && <div className="err" style={{ marginBottom: 12 }}>{msg}</div>}
+        <button className="primary" disabled={busy}>{busy ? 'Please wait…' : 'Save password'}</button>
+        <div style={{ height: 10 }} />
+        <button type="button" className="secondary" onClick={signOut}>Cancel</button>
       </form>
     </div>
   );
@@ -110,18 +145,26 @@ function Pending() {
   );
 }
 
+// A plain entry is [id, label, Component, permissionTable|null|'ADMIN'].
+// A group is { group, label, items: [...entries] } and shows as one expandable menu item.
 const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
   ['members', '👥 Members', Members, 'members'],
-  ['attendance', '✅ Attendance', Attendance, 'attendance'],
-  ['quickattendance', '⚡ Quick Attendance', QuickAttendance, 'attendance'],
-  ['headcount', '🔢 Headcount Attendance', HeadcountAttendance, 'attendance_headcount'],
-  ['giving', '💰 Giving', Giving, 'giving'],
-  ['offerings', '🧺 Offerings', Offerings, 'offering_entries'],
-  ['firstfruit', '🌱 First Fruit', FirstFruit, 'member_contributions'],
-  ['welfaremembers', '🤝 Welfare Members', WelfareMembers, 'welfare_members'],
-  ['welfaredues', '🤝 Welfare Dues', WelfareDues, 'member_contributions'],
-  ['welfarefund', '🤝 Welfare Fund', WelfareFund, 'welfare_transactions'],
+  { group: 'attendance', label: '✅ Attendance', items: [
+    ['attendance', 'Attendance Records', Attendance, 'attendance'],
+    ['quickattendance', 'Quick Attendance', QuickAttendance, 'attendance'],
+    ['headcount', 'Headcount Attendance', HeadcountAttendance, 'attendance_headcount'],
+  ] },
+  { group: 'finance', label: '💰 Finance', items: [
+    ['giving', 'Giving', Giving, 'giving'],
+    ['offerings', 'Offerings', Offerings, 'offering_entries'],
+    ['firstfruit', 'First Fruit', FirstFruit, 'member_contributions'],
+  ] },
+  { group: 'welfare', label: '🤝 Welfare', items: [
+    ['welfaremembers', 'Welfare Members', WelfareMembers, 'welfare_members'],
+    ['welfaredues', 'Welfare Dues', WelfareDues, 'member_contributions'],
+    ['welfarefund', 'Welfare Fund', WelfareFund, 'welfare_transactions'],
+  ] },
   ['departments', '🏛 Departments', Departments, 'departments'],
   ['events', '📅 Events', Events, 'events'],
   ['sms', '💬 Send SMS', SendSMS, 'members'],
@@ -147,9 +190,19 @@ function Shell() {
   const { pending, wipe } = useData();
   const [page, setPage] = useState('dashboard');
   const [open, setOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState({});
 
-  const items = NAV.filter(([, , , need]) => (need === null ? true : need === 'ADMIN' ? role === 'admin' : can(role, need, 'read')));
-  const Current = (items.find(([id]) => id === page) || items[0])[2];
+  const allowed = ([, , , need]) => (need === null ? true : need === 'ADMIN' ? role === 'admin' : can(role, need, 'read'));
+  // keep only the pages this role may see; drop groups that end up empty
+  const menu = NAV
+    .map((n) => (Array.isArray(n) ? n : { ...n, items: n.items.filter(allowed) }))
+    .filter((n) => (Array.isArray(n) ? allowed(n) : n.items.length > 0));
+  const flat = menu.flatMap((n) => (Array.isArray(n) ? [n] : n.items));
+  const Current = (flat.find(([id]) => id === page) || flat[0])[2];
+  const currentId = (flat.find(([id]) => id === page) || flat[0])[0];
+
+  const go = (id) => { setPage(id); setOpen(false); };
+  const toggle = (g) => setOpenGroups((o) => ({ ...o, [g]: !o[g] }));
 
   async function logout() {
     if (pending > 0 && !confirm(`You have ${pending} unsynced change(s). They stay on this device and will sync the next time you sign in with internet. Sign out anyway?`)) return;
@@ -162,9 +215,24 @@ function Shell() {
       <aside className={'sidebar' + (open ? ' open' : '')}>
         <div className="brand">⛪ {CHURCH}<small>Management System</small></div>
         <div className="nav">
-          {items.map(([id, label]) => (
-            <button key={id} className={page === id ? 'active' : ''} onClick={() => { setPage(id); setOpen(false); }}>{label}</button>
-          ))}
+          {menu.map((n) => {
+            if (Array.isArray(n)) {
+              const [id, label] = n;
+              return <button key={id} className={currentId === id ? 'active' : ''} onClick={() => go(id)}>{label}</button>;
+            }
+            const hasActive = n.items.some(([id]) => id === currentId);
+            const expanded = openGroups[n.group] ?? hasActive; // the group holding the current page is open by default
+            return (
+              <div key={n.group} className="navgroup">
+                <button className={'grouphead' + (hasActive ? ' hasactive' : '')} onClick={() => toggle(n.group)} aria-expanded={expanded}>
+                  <span>{n.label}</span><span className={'chev' + (expanded ? ' open' : '')}>▸</span>
+                </button>
+                {expanded && n.items.map(([id, label]) => (
+                  <button key={id} className={'sub' + (currentId === id ? ' active' : '')} onClick={() => go(id)}>{label}</button>
+                ))}
+              </div>
+            );
+          })}
         </div>
       </aside>
       <main className="main">
