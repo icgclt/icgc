@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog,
+  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal,
 } from './pages';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
@@ -26,7 +26,7 @@ function Gate() {
   if (recovery) return <SetNewPassword />;
   if (!profile || role === 'pending') return <Pending />;
   return (
-    <DataProvider key={user.id} uid={user.id}>
+    <DataProvider key={user.id} uid={user.id} role={role}>
       <Shell />
     </DataProvider>
   );
@@ -149,6 +149,7 @@ function Pending() {
 // A group is { group, label, items: [...entries] } and shows as one expandable menu item.
 const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
+  ['memberportal', '🙋 My Church', MemberPortal, null],
   ['members', '👥 Members', Members, 'members'],
   ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors'],
   ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
@@ -202,7 +203,7 @@ function Shell() {
   const [open, setOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState({});
 
-  const allowed = ([, , , need]) => (need === null ? true : need === 'ADMIN' ? role === 'admin' : can(role, need, 'read'));
+  const allowed = ([id, , , need]) => role === 'member' ? (id === 'memberportal' || id === 'settings') : (need === null ? true : need === 'ADMIN' ? role === 'admin' : can(role, need, 'read'));
   // keep only the pages this role may see; drop groups that end up empty
   const menu = NAV
     .map((n) => (Array.isArray(n) ? n : { ...n, items: n.items.filter(allowed) }))

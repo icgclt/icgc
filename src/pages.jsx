@@ -1166,3 +1166,5 @@ export function Settings() {
     </>
   );
 }
+
+export { default as MemberPortal } from './memberPortal';

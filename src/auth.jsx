@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
 
-export const ROLES = ['admin', 'finance', 'secretary', 'viewer', 'pending'];
+export const ROLES = ['admin', 'finance', 'secretary', 'viewer', 'member', 'pending'];
 const READ_ALL = ['admin', 'finance', 'secretary', 'viewer'];
 
 // Mirrors the row-level security policies in supabase/schema.sql (the database is the real enforcer;

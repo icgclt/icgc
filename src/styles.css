@@ -63,3 +63,5 @@ td.actions{white-space:nowrap}td.actions button{margin-right:6px;padding:6px 10p
   .main{margin-left:0;width:100%;padding:15px}.mobile-menu{display:inline-block}
   .top h1{font-size:21px}.cards{grid-template-columns:repeat(2,1fr)}.grid2,.formgrid{grid-template-columns:1fr}
 }
+
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 18px}.tab{border:1px solid #d7dce2;background:#fff;border-radius:8px;padding:8px 13px;cursor:pointer}.tab.active{background:#111827;color:#fff}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px}.card strong{display:block;font-size:1.5rem;margin-top:5px}.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.listrow{padding:12px 0;border-bottom:1px solid #eee}.listrow:last-child{border-bottom:0}

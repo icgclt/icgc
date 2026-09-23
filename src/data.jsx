@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 export const TABLES = [
   'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
   'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
-  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'volunteers', 'service_plans', 'pastoral_cases',
+  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'volunteers', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements',
 ];
 
 // Financial records use sessionStorage rather than localStorage. This keeps sensitive giving/welfare
@@ -78,7 +78,8 @@ async function send(op) {
   }
 }
 
-export function DataProvider({ uid, children }) {
+export function DataProvider({ uid, role, children }) {
+  const ACTIVE_TABLES = role === 'member' ? ['members','attendance','giving','events','prayer_requests','event_registrations','announcements'] : TABLES;
   const ck = (t) => `cm:${uid}:cache:${t}`;
   const okey = `cm:${uid}:outbox`;
   const skey = `cm:${uid}:sensitive-outbox`;
@@ -86,7 +87,7 @@ export function DataProvider({ uid, children }) {
   const sfkey = `cm:${uid}:sensitive-failed`;
   const sensitiveStorage = typeof sessionStorage !== 'undefined' ? sessionStorage : localStorage;
 
-  const [data, setData] = useState(() => Object.fromEntries(TABLES.map((t) => [t, read(ck(t), [], storageForTable(t))])));
+  const [data, setData] = useState(() => Object.fromEntries(ACTIVE_TABLES.map((t) => [t, read(ck(t), [], storageForTable(t))])));
   const dataRef = useRef(data);
   const initialPersistentOutbox = read(okey, []);
   const legacySensitive = initialPersistentOutbox.filter((op) => SENSITIVE_TABLES.has(op.table));
@@ -154,10 +155,10 @@ export function DataProvider({ uid, children }) {
       }
       if ((pull || hadFailure) && outboxRef.current.length === 0) {
         const next = {};
-        for (const t of TABLES) next[t] = await fetchAll(t);
+        for (const t of ACTIVE_TABLES) next[t] = await fetchAll(t);
         if (outboxRef.current.length === 0) {
           dataRef.current = next;
-          TABLES.forEach((t) => write(ck(t), next[t], storageForTable(t)));
+          ACTIVE_TABLES.forEach((t) => write(ck(t), next[t], storageForTable(t)));
           setData(next);
           setLastSync(new Date());
           setSyncError(false);
@@ -224,7 +225,7 @@ export function DataProvider({ uid, children }) {
   const discardFailed = () => { failedRef.current = []; write(fkey, []); write(sfkey, [], sensitiveStorage); setFailed([]); };
 
   const wipe = () => {
-    TABLES.forEach((t) => removeStored(ck(t), storageForTable(t)));
+    ACTIVE_TABLES.forEach((t) => removeStored(ck(t), storageForTable(t)));
     removeStored(okey);
     removeStored(skey, sensitiveStorage);
     removeStored(fkey);
