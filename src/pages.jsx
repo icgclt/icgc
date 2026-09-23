@@ -38,6 +38,8 @@ export function Dashboard() {
         <div className="card"><div className="label">Last attendance{lastDate ? ` (${lastDate})` : ''}</div><div className="num">{lastPresent}</div><div className="muted sm">present</div></div>
         {showGiving && <div className="card"><div className="label">Giving this month</div><div className="num" style={{ fontSize: 22 }}>{money(monthGiving)}</div></div>}
         <div className="card"><div className="label">Departments</div><div className="num">{data.departments.length}</div></div>
+        <div className="card"><div className="label">New visitors</div><div className="num">{data.visitors.filter(v => v.visit_date === today()).length}</div><div className="muted sm">today</div></div>
+        <div className="card"><div className="label">Open follow-ups</div><div className="num">{data.follow_ups.filter(f => f.status === 'Open' || f.status === 'In Progress').length}</div></div>
       </div>
       <div className="grid2">
         <div className="panel">
@@ -996,6 +998,108 @@ export function Users() {
       {dialog && <UserDialog {...dialog} onClose={() => setDialog(null)} onDone={load} />}
     </>
   );
+}
+
+
+/* ---------------- Ministry operations ---------------- */
+export function Visitors() {
+  return <Crud table="visitors" title="Visitors" noun="visitor" sortKey="visit_date" sortDir="desc"
+    searchKeys={['name','phone','invited_by','assigned_to']}
+    filters={[{ key:'follow_up_status', label:'All follow-up statuses', options:['New','Contacted','Visited','Connected','Closed'] }]}
+    defaults={{ visit_date: today(), follow_up_status:'New' }}
+    fields={[
+      {key:'visit_date',label:'Visit date',type:'date',required:true},{key:'name',label:'Name',required:true},{key:'phone',label:'Phone',type:'tel'},
+      {key:'gender',label:'Gender',type:'select',options:['Male','Female']},{key:'invited_by',label:'Invited by'},{key:'address',label:'Address'},
+      {key:'prayer_request',label:'Prayer request',type:'textarea',full:true},{key:'follow_up_status',label:'Follow-up status',type:'select',options:['New','Contacted','Visited','Connected','Closed'],required:true},
+      {key:'assigned_to',label:'Follow-up officer'},{key:'notes',label:'Notes',type:'textarea',full:true}
+    ]}
+    columns={[{label:'Date',key:'visit_date'},{label:'Visitor',render:r=><><b>{r.name}</b><br/><small>{r.phone||'No phone'}</small></>},{label:'Invited by',key:'invited_by'},{label:'Follow-up',render:r=>badge(r.follow_up_status)},{label:'Officer',key:'assigned_to'}]}/>
+}
+
+export function Groups() {
+  return <Crud table="groups" title="Groups / House Fellowships" noun="group" sortKey="name" searchKeys={['name','leader','location']}
+    filters={[{key:'status',label:'All statuses',options:['Active','Inactive']}]}
+    defaults={{status:'Active',group_type:'House Fellowship'}}
+    fields={[
+      {key:'name',label:'Group name',required:true},{key:'group_type',label:'Type',required:true},{key:'leader',label:'Leader'},{key:'assistant_leader',label:'Assistant leader'},
+      {key:'meeting_day',label:'Meeting day'},{key:'meeting_time',label:'Meeting time'},{key:'location',label:'Location'},
+      {key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true},{key:'notes',label:'Notes',type:'textarea',full:true}
+    ]}
+    columns={[{label:'Group',render:r=><b>{r.name}</b>},{label:'Type',key:'group_type'},{label:'Leader',key:'leader'},{label:'Meeting',render:r=><>{r.meeting_day||''}{r.meeting_time?` · ${r.meeting_time}`:''}</>},{label:'Status',render:r=>badge(r.status)}]}/>
+}
+
+export function FollowUps() {
+  return <Crud table="follow_ups" title="Follow-up" noun="follow-up" sortKey="date" sortDir="desc" searchKeys={['person_name','phone','reason','assigned_to','outcome']}
+    filters={[{key:'status',label:'All statuses',options:['Open','In Progress','Completed','Closed']},{key:'category',label:'All categories',options:['Visitor','New Convert','Member','Youth','Family','Other']}]}
+    defaults={{date:today(),status:'Open',category:'Member',method:'Phone'}}
+    fields={[
+      {key:'date',label:'Date',type:'date',required:true},{key:'person_name',label:'Person',required:true},{key:'phone',label:'Phone',type:'tel'},
+      {key:'category',label:'Category',type:'select',options:['Visitor','New Convert','Member','Youth','Family','Other'],required:true},{key:'reason',label:'Reason',required:true},
+      {key:'assigned_to',label:'Assigned to'},{key:'method',label:'Method',type:'select',options:['Phone','WhatsApp','Visit','SMS','In Person']},
+      {key:'outcome',label:'Outcome',type:'textarea',full:true},{key:'next_action',label:'Next action'},{key:'next_date',label:'Next follow-up',type:'date'},
+      {key:'status',label:'Status',type:'select',options:['Open','In Progress','Completed','Closed'],required:true},{key:'notes',label:'Notes',type:'textarea',full:true}
+    ]}
+    columns={[{label:'Date',key:'date'},{label:'Person',render:r=><><b>{r.person_name}</b><br/><small>{r.category}</small></>},{label:'Reason',key:'reason'},{label:'Assigned',key:'assigned_to'},{label:'Next date',key:'next_date'},{label:'Status',render:r=>badge(r.status)}]}/>
+}
+
+export function PrayerRequests() {
+  return <Crud table="prayer_requests" title="Prayer Requests" noun="prayer request" sortKey="date" sortDir="desc" searchKeys={['requester','request','category','assigned_to']}
+    filters={[{key:'status',label:'All statuses',options:['New','Assigned','Praying','Answered','Closed']},{key:'category',label:'All categories',options:['General','Healing','Family','Finance','Work','Salvation','Thanksgiving','Other']}]}
+    defaults={{date:today(),status:'New',category:'General',confidential:false}}
+    fields={[
+      {key:'date',label:'Date',type:'date',required:true},{key:'requester',label:'Requester',required:true},{key:'phone',label:'Phone',type:'tel'},
+      {key:'category',label:'Category',type:'select',options:['General','Healing','Family','Finance','Work','Salvation','Thanksgiving','Other']},
+      {key:'request',label:'Prayer request',type:'textarea',required:true,full:true},{key:'confidential',label:'Confidential',type:'checkbox'},
+      {key:'assigned_to',label:'Assigned to'},{key:'status',label:'Status',type:'select',options:['New','Assigned','Praying','Answered','Closed'],required:true},
+      {key:'answered_date',label:'Answered date',type:'date'},{key:'notes',label:'Notes',type:'textarea',full:true}
+    ]}
+    columns={[{label:'Date',key:'date'},{label:'Requester',key:'requester'},{label:'Request',render:r=><span title={r.request}>{String(r.request||'').slice(0,70)}{String(r.request||'').length>70?'…':''}</span>},{label:'Assigned',key:'assigned_to'},{label:'Status',render:r=>badge(r.status)}]}/>
+}
+
+export function Volunteers() {
+  return <Crud table="volunteers" title="Volunteers" noun="volunteer" sortKey="person_name" searchKeys={['person_name','ministry','role_name','phone']}
+    filters={[{key:'status',label:'All statuses',options:['Active','Inactive']}]}
+    defaults={{status:'Active'}}
+    fields={[
+      {key:'person_name',label:'Person',required:true},{key:'ministry',label:'Ministry / department',required:true},{key:'role_name',label:'Role'},
+      {key:'phone',label:'Phone',type:'tel'},{key:'availability',label:'Availability'},{key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true},
+      {key:'notes',label:'Notes',type:'textarea',full:true}
+    ]}
+    columns={[{label:'Person',key:'person_name'},{label:'Ministry',key:'ministry'},{label:'Role',key:'role_name'},{label:'Phone',key:'phone'},{label:'Status',render:r=>badge(r.status)}]}/>
+}
+
+export function ServicePlans() {
+  return <Crud table="service_plans" title="Service Plans" noun="service item" sortKey="service_date" searchKeys={['service_name','service_item','assigned_to']}
+    filters={[{key:'status',label:'All statuses',options:['Planned','Confirmed','Completed','Cancelled']}]}
+    defaults={{service_date:today(),service_name:'Sunday Service',item_order:1,status:'Planned'}}
+    fields={[
+      {key:'service_date',label:'Service date',type:'date',required:true},{key:'service_name',label:'Service',required:true},{key:'item_order',label:'Order',type:'number',min:1,required:true},
+      {key:'service_item',label:'Service item',required:true},{key:'assigned_to',label:'Assigned to'},{key:'duration',label:'Duration'},
+      {key:'status',label:'Status',type:'select',options:['Planned','Confirmed','Completed','Cancelled'],required:true},{key:'notes',label:'Notes',type:'textarea',full:true}
+    ]}
+    columns={[{label:'Date',key:'service_date'},{label:'Service',key:'service_name'},{label:'#',key:'item_order'},{label:'Item',key:'service_item'},{label:'Assigned',key:'assigned_to'},{label:'Status',render:r=>badge(r.status)}]}/>
+}
+
+export function PastoralCare() {
+  return <Crud table="pastoral_cases" title="Pastoral Care" noun="case" sortKey="opened_date" sortDir="desc" searchKeys={['person_name','category','assigned_to']}
+    filters={[{key:'status',label:'All statuses',options:['Open','In Progress','Resolved','Closed']},{key:'priority',label:'All priorities',options:['Low','Normal','High','Urgent']}]}
+    defaults={{opened_date:today(),status:'Open',priority:'Normal'}}
+    fields={[
+      {key:'opened_date',label:'Opened date',type:'date',required:true},{key:'person_name',label:'Person',required:true},{key:'category',label:'Category',required:true},
+      {key:'assigned_to',label:'Assigned pastor / leader'},{key:'priority',label:'Priority',type:'select',options:['Low','Normal','High','Urgent'],required:true},
+      {key:'status',label:'Status',type:'select',options:['Open','In Progress','Resolved','Closed'],required:true},{key:'next_follow_up',label:'Next follow-up',type:'date'},
+      {key:'private_notes',label:'Confidential notes',type:'textarea',full:true}
+    ]}
+    columns={[{label:'Opened',key:'opened_date'},{label:'Person',key:'person_name'},{label:'Category',key:'category'},{label:'Assigned',key:'assigned_to'},{label:'Priority',render:r=>badge(r.priority)},{label:'Status',render:r=>badge(r.status)}]}/>
+}
+
+export function AuditLog() {
+  const { role } = useAuth();
+  const [rows,setRows]=useState([]); const [error,setError]=useState('');
+  useEffect(()=>{ if(role!=='admin') return; supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);}); },[role]);
+  if(role!=='admin') return <div className="panel"><h1>Audit Log</h1><p className="muted">Admin access only.</p></div>;
+  return <><div className="top"><h1>Audit Log</h1><button className="secondary" onClick={()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);})}>Refresh</button></div>
+    <div className="panel">{error&&<div className="err">{error}</div>}<div className="tablewrap"><table><thead><tr><th>Time</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{new Date(r.at).toLocaleString()}</td><td>{r.table_name}</td><td>{badge(r.action)}</td><td>{r.row_id}</td><td>{r.actor||'System'}</td></tr>)}{!rows.length&&<tr><td colSpan="5" className="empty">No audit records.</td></tr>}</tbody></table></div></div></>;
 }
 
 /* ---------------- Settings ---------------- */

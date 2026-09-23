@@ -15,6 +15,8 @@ function Field({ f, value, error, onChange, list }) {
     );
   } else if (f.type === 'textarea') {
     input = <textarea {...common} />;
+  } else if (f.type === 'checkbox') {
+    input = <input id={'f_' + f.key} type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />;
   } else {
     input = (
       <input
@@ -82,11 +84,11 @@ export default function Crud({
     const out = {};
     for (const f of fields) {
       let v = form.values[f.key];
-      if (typeof v === 'string') v = v.trim();
+      if (typeof v === 'string' && f.type !== 'checkbox') v = v.trim();
       if (v === '' && f.fallback) v = f.fallback;
       if (f.required && (v === '' || v == null)) errors[f.key] = 'Required';
       const isText = !f.type || f.type === 'text' || f.type === 'textarea';
-      if (v === '' && !isText) v = null;
+      if (v === '' && !isText && f.type !== 'checkbox') v = null;
       if (f.type === 'number' && v !== null) {
         v = Number(v);
         if (!Number.isFinite(v) || (f.gt != null && v <= f.gt)) errors[f.key] = f.gt != null ? `Must be greater than ${f.gt}` : 'Invalid number';

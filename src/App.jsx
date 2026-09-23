@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareMembers, WelfareDues, WelfareFund,
+  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog,
 } from './pages';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
@@ -150,6 +150,15 @@ function Pending() {
 const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
   ['members', '👥 Members', Members, 'members'],
+  ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors'],
+  ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
+  { group: 'ministry', label: '⛪ Ministry', items: [
+    ['groups', 'Groups / House Fellowships', Groups, 'groups'],
+    ['prayer', 'Prayer Requests', PrayerRequests, 'prayer_requests'],
+    ['volunteers', 'Volunteers', Volunteers, 'volunteers'],
+    ['serviceplans', 'Service Plans', ServicePlans, 'service_plans'],
+    ['pastoral', 'Pastoral Care', PastoralCare, 'pastoral_cases'],
+  ] },
   { group: 'attendance', label: '✅ Attendance', items: [
     ['attendance', 'Attendance Records', Attendance, 'attendance'],
     ['quickattendance', 'Quick Attendance', QuickAttendance, 'attendance'],
@@ -170,6 +179,7 @@ const NAV = [
   ['sms', '💬 Send SMS', SendSMS, 'members'],
   ['reports', '📈 Reports', Reports, null],
   ['users', '🔑 Users', Users, 'ADMIN'],
+  ['audit', '🧾 Audit Log', AuditLog, 'ADMIN'],
   ['settings', '⚙ Settings', Settings, null],
 ];
 

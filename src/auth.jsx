@@ -20,6 +20,13 @@ export const PERMS = {
   offering_entries:        { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
   member_contributions:    { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
   welfare_transactions:    { read: ['admin', 'finance'], write: ['admin', 'finance'], del: ['admin'] },
+  visitors:               { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  groups:                 { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  follow_ups:             { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  prayer_requests:        { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  volunteers:             { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  service_plans:          { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
+  pastoral_cases:         { read: ['admin', 'secretary'], write: ['admin', 'secretary'], del: ['admin'] },
 };
 export const can = (role, table, action) => PERMS[table]?.[action]?.includes(role) || false;
 
