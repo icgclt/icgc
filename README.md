@@ -5,7 +5,7 @@ with real logins, role-based access and an offline queue.
 
 ## What you get
 - **Login + roles** — `admin`, `finance`, `secretary`, `viewer` (new sign-ups start as `pending` and see nothing until approved)
-- **Modules** — Members, Attendance, Giving (tithes/offerings, cash / mobile money / bank / card), Departments, Events, Reports, CSV export
+- **Modules** — Members, Visitors, Follow-up, Groups/House Fellowships, Attendance, Giving, Offerings, First Fruit, Welfare, Prayer Requests, Volunteers, Service Plans, Pastoral Care, Departments, Events, Reports, Users, Audit Log, CSV export
 - **Security in the database** — Postgres row-level security enforces the roles, so they hold even if someone bypasses the UI
 - **Audit log** — every insert/update/delete is recorded with who did it (`audit_log` table, admin-readable)
 - **Works with poor internet** — the app shell is cached; new/edited/deleted records are saved on the device instantly and
@@ -90,6 +90,8 @@ src/App.jsx           login, approval screen, layout
 public/sw.js          offline app shell
 ```
 
-## Ideas for next steps
-Cashbook and weekly cash report, fixed assets with depreciation, member photos, SMS reminders, multiple branches,
-an audit-log viewer page, attendance by member ID (instead of typed names), password-reset page.
+## Included in this upgrade
+The app now includes visitor follow-up, ministry groups, follow-up cases, prayer request tracking, volunteer records, service planning, confidential pastoral cases and an admin audit-log viewer. The dashboard also shows today's visitors and open follow-ups.
+
+## Suggested next steps
+Cashbook and weekly cash report, fixed assets with depreciation, member photos, SMS reminders, multiple branches, attendance by member ID/QR code, event registration, child check-in, mobile-money payment integration and a dedicated member-facing portal.
