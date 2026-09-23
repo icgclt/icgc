@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal,
+  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn,
 } from './pages';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
@@ -151,6 +151,10 @@ const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
   ['memberportal', '🙋 My Church', MemberPortal, null],
   ['members', '👥 Members', Members, 'members'],
+  ['families', '🏠 Families', Families, 'families'],
+  ['children', '🧒 Children', Children, 'children'],
+  ['childcheckin', '🛡 Children Check-in', ChildCheckIn, 'child_checkins'],
+  ['membercheckin', '📱 Member Check-in', MemberCheckIn, 'attendance'],
   ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors'],
   ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
   { group: 'ministry', label: '⛪ Ministry', items: [

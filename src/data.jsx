@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 export const TABLES = [
   'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
   'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
-  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'volunteers', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements',
+  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'volunteers', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins',
 ];
 
 // Financial records use sessionStorage rather than localStorage. This keeps sensitive giving/welfare

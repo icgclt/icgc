@@ -1168,3 +1168,113 @@ export function Settings() {
 }
 
 export { default as MemberPortal } from './memberPortal';
+
+/* ---------------- Family / Children / Check-in ---------------- */
+export function Families() {
+  return <Crud
+    table="families" title="Families / Households" noun="family"
+    sortKey="family_name" searchKeys={['family_name','phone','address']}
+    fields={[
+      {key:'family_name',label:'Family name',required:true},
+      {key:'phone',label:'Family phone',type:'tel'},
+      {key:'address',label:'Address'},
+      {key:'notes',label:'Notes',type:'textarea',full:true},
+    ]}
+    columns={[
+      {label:'Family',key:'family_name'},
+      {label:'Phone',key:'phone'},
+      {label:'Address',key:'address'},
+    ]}
+  />;
+}
+
+export function Children() {
+  const {data}=useData();
+  const families=(data.families||[]).map(f=>({value:f.id,label:f.family_name}));
+  const members=data.members.map(m=>({value:m.id,label:m.name}));
+  return <Crud
+    table="children" title="Children" noun="child"
+    sortKey="name" searchKeys={['name','guardian_name','guardian_phone']}
+    filters={[{key:'status',label:'All statuses',options:['Active','Inactive']}]}
+    defaults={{status:'Active'}}
+    fields={[
+      {key:'name',label:'Child name',required:true},
+      {key:'dob',label:'Date of birth',type:'date'},
+      {key:'gender',label:'Gender',type:'select',options:['Male','Female']},
+      {key:'family_id',label:'Family',type:'select',options:families},
+      {key:'member_id',label:'Linked member/guardian',type:'select',options:members},
+      {key:'guardian_name',label:'Guardian name'},
+      {key:'guardian_phone',label:'Guardian phone',type:'tel'},
+      {key:'pickup_notes',label:'Pickup notes',type:'textarea',full:true},
+      {key:'medical_notes',label:'Medical notes',type:'textarea',full:true},
+      {key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true},
+    ]}
+    columns={[
+      {label:'Child',render:c=><><b>{c.name}</b><br/><small>{c.dob||'DOB not recorded'}</small></>},
+      {label:'Guardian',render:c=><>{c.guardian_name||'Not recorded'}<br/><small>{c.guardian_phone||''}</small></>},
+      {label:'Family',render:c=>families.find(f=>f.value===c.family_id)?.label||'Not assigned'},
+      {label:'Status',render:c=>badge(c.status)},
+    ]}
+  />;
+}
+
+export function ChildCheckIn() {
+  const {data,save}=useData();
+  const [q,setQ]=useState('');
+  const [service,setService]=useState('Sunday Service');
+  const [selected,setSelected]=useState(null);
+  const [msg,setMsg]=useState('');
+  const active=(data.children||[]).filter(c=>c.status==='Active');
+  const results=q.trim()?active.filter(c=>`${c.name} ${c.guardian_name||''} ${c.guardian_phone||''}`.toLowerCase().includes(q.toLowerCase())).slice(0,12):[];
+  const todayChecks=(data.child_checkins||[]).filter(x=>x.date===today());
+  const checkedIds=new Set(todayChecks.filter(x=>!x.check_out).map(x=>x.child_id));
+  function checkIn(c){
+    if(checkedIds.has(c.id)){setMsg(`${c.name} is already checked in.`);return;}
+    const code=String(Math.floor(100000+Math.random()*900000));
+    save('child_checkins',{id:uuid(),child_id:c.id,date:today(),service,check_in:new Date().toISOString(),pickup_code:code,notes:''});
+    setSelected({child:c,code}); setQ(''); setMsg(`${c.name} checked in. Give the guardian pickup code ${code}.`);
+  }
+  function checkOut(row){
+    const code=prompt('Enter the pickup code.');
+    if(!code || String(code)!==String(row.pickup_code)){alert('Pickup code does not match.');return;}
+    save('child_checkins',{id:row.id,check_out:new Date().toISOString(),pickup_by:row.pickup_by||row.child_name||'Guardian'});
+    setMsg('Child checked out successfully.');
+  }
+  const activeRows=todayChecks.map(r=>({...r,child_name:data.children.find(c=>c.id===r.child_id)?.name||'Unknown'}));
+  return <>
+    <div className="top"><div><h1>Children Check-in</h1><div className="muted">Fast Sunday check-in and secure pickup.</div></div></div>
+    <div className="panel">
+      <div className="toolbar"><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}><option>Sunday Service</option><option>Children's Service</option><option>Special Program</option></select></div><div className="fld" style={{flex:1}}><small>Search child, guardian or phone</small><input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Type name or phone" /></div></div>
+      {msg&&<p className="muted">{msg}</p>}
+      {results.length>0&&<div className="quicklist">{results.map(c=><button className="quickrow" key={c.id} onClick={()=>checkIn(c)}><span><b>{c.name}</b><br/><small>{c.guardian_name||'Guardian not recorded'} · {c.guardian_phone||'No phone'}</small></span><span className="badge">Check in</span></button>)}</div>}
+      {!q&&<div className="empty">Search for a child to begin.</div>}
+    </div>
+    <div className="panel"><h2>Today's children</h2><div className="tablewrap"><table><thead><tr><th>Child</th><th>Check-in</th><th>Pickup code</th><th>Status</th><th></th></tr></thead><tbody>{activeRows.map(r=><tr key={r.id}><td><b>{r.child_name}</b></td><td>{r.check_in?new Date(r.check_in).toLocaleTimeString():''}</td><td><b>{r.pickup_code||''}</b></td><td>{r.check_out?'Checked out':'Checked in'}</td><td className="actions">{!r.check_out&&<button className="secondary sm" onClick={()=>checkOut(r)}>Check out</button>}</td></tr>)}{!activeRows.length&&<tr><td colSpan="5" className="empty">No children checked in today.</td></tr>}</tbody></table></div></div>
+    {selected&&<div className="panel"><h2>Pickup slip</h2><p><b>{selected.child.name}</b></p><p>Pickup code: <strong style={{fontSize:28,letterSpacing:4}}>{selected.code}</strong></p><button className="secondary" onClick={()=>window.print()}>Print</button></div>}
+  </>;
+}
+
+export function MemberCheckIn() {
+  const {data,save}=useData();
+  const [code,setCode]=useState('');
+  const [service,setService]=useState('Sunday Service');
+  const [msg,setMsg]=useState('');
+  const [recent,setRecent]=useState([]);
+  const memberMap=useMemo(()=>new Map(data.members.filter(m=>m.member_code).map(m=>[String(m.member_code).toUpperCase(),m])),[data.members]);
+  function submit(e){
+    e.preventDefault();
+    const key=code.trim().toUpperCase();
+    const m=memberMap.get(key);
+    if(!m){setMsg('Member code not found.');return;}
+    const existing=data.attendance.find(a=>a.member_id===m.id && a.date===today() && a.service===service && a.status==='Present');
+    if(existing){setMsg(`${m.name} is already marked present.`);setCode('');return;}
+    save('attendance',{id:uuid(),date:today(),service,person_name:m.name,member_id:m.id,status:'Present',note:'Member code check-in'});
+    setRecent(r=>[{name:m.name,code:m.member_code,time:new Date().toLocaleTimeString()},...r].slice(0,10));
+    setMsg(`Welcome, ${m.name}. Attendance recorded.`);setCode('');
+  }
+  return <>
+    <div className="top"><div><h1>Member QR / ID Check-in</h1><div className="muted">Use the member code printed on the church card. A future camera scanner can use the same code.</div></div></div>
+    <div className="panel" style={{maxWidth:700}}><form onSubmit={submit}><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}><option>Sunday Service</option><option>Midweek Service</option><option>Prayer Meeting</option><option>Special Program</option></select></div><div className="fld" style={{marginTop:14}}><small>Member code</small><input autoFocus value={code} onChange={e=>setCode(e.target.value)} placeholder="Example: M-1A2B3C4D" autoCapitalize="characters" /></div><button className="primary" style={{marginTop:12}}>Record attendance</button></form>{msg&&<p className="muted">{msg}</p>}</div>
+    <div className="panel"><h2>Recent check-ins</h2>{recent.map((r,i)=><div className="listrow" key={i}><b>{r.name}</b><span className="muted"> · {r.code} · {r.time}</span></div>)}{!recent.length&&<p className="muted">No check-ins recorded in this browser session.</p>}</div>
+  </>;
+}

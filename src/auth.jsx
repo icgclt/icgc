@@ -27,6 +27,9 @@ export const PERMS = {
   volunteers:             { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
   service_plans:          { read: READ_ALL, write: ['admin', 'secretary'], del: ['admin'] },
   pastoral_cases:         { read: ['admin', 'secretary'], write: ['admin', 'secretary'], del: ['admin'] },
+  families:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
+  children:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
+  child_checkins:         { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
 };
 export const can = (role, table, action) => PERMS[table]?.[action]?.includes(role) || false;
 
