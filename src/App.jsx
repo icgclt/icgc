@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings, EventAttendance, ServiceTimer,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn, FinanceCenter, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter,
+  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn, FinanceCenter, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, Branches,
 } from './pages';
 import { MemberCards, DepartmentDashboard, GroupDashboard, VolunteerSchedule, EventRegistration } from './operational';
 
@@ -198,6 +198,8 @@ const NAV = [
   ['engagement', '🤖 Engagement Automation', EngagementAutomation, 'announcements'],
   ['automationcenter', '⚙️ Automation Center', AutomationCenter, 'communication_queue'],
   ['reports', '📈 Reports', Reports, null],
+  ['advancedreports', '📊 Advanced Reports', AdvancedReports, null],
+  ['branches', '🏢 Branches', Branches, 'ADMIN'],
   ['users', '🔑 Users', Users, 'ADMIN'],
   ['audit', '🧾 Audit Log', AuditLog, 'ADMIN'],
   ['settings', '⚙ Settings', Settings, null],

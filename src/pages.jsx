@@ -1617,3 +1617,71 @@ export function AutomationCenter() {
     <div className="grid2"><div className="panel"><h2>Today's birthdays</h2>{birthdays.length?birthdays.map(m=><div className="listrow" key={m.id}><b>{m.name}</b><span className="muted"> · {m.phone}</span></div>):<div className="empty">No birthdays with phone numbers today.</div>}</div><div className="panel"><h2>Recent visitors</h2>{recentVisitors.length?recentVisitors.slice(0,20).map(v=><div className="listrow" key={v.id}><b>{v.name}</b><span className="muted"> · {v.visit_date} · {v.phone}</span></div>):<div className="empty">No visitors with phone numbers this month.</div>}</div></div>
   </>;
 }
+
+
+/* ---------------- V14 Advanced Reports + Branches ---------------- */
+export function AdvancedReports() {
+  const { data } = useData();
+  const { role } = useAuth();
+  const [period, setPeriod] = useState('12');
+  const months = Number(period);
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+  const key = (d) => String(d || '').slice(0, 7);
+  const labels = Array.from({ length: months }, (_, i) => {
+    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  });
+  const activeMembers = (data.members||[]).filter(m => m.status !== 'Inactive');
+  const attendanceByMonth = Object.fromEntries(labels.map(x => [x, {present:0, visitor:0, absent:0, sessions:new Set()}]));
+  (data.attendance||[]).forEach(a => {
+    const k=key(a.date); if(!attendanceByMonth[k]) return;
+    if(a.status==='Present') attendanceByMonth[k].present++;
+    else if(a.status==='Visitor') attendanceByMonth[k].visitor++;
+    else if(a.status==='Absent') attendanceByMonth[k].absent++;
+    attendanceByMonth[k].sessions.add(`${a.date}|${a.service}`);
+  });
+  const eventByMonth = Object.fromEntries(labels.map(x=>[x,{events:0,registrations:0,attended:0}]));
+  (data.events||[]).forEach(e=>{const k=key(e.date);if(eventByMonth[k])eventByMonth[k].events++;});
+  (data.event_registrations||[]).forEach(r=>{const ev=(data.events||[]).find(e=>e.id===r.event_id);const k=key(ev?.date);if(eventByMonth[k])eventByMonth[k].registrations++;});
+  const monthRows=labels.map(k=>({month:k,...attendanceByMonth[k],...eventByMonth[k],sessions:attendanceByMonth[k].sessions.size}));
+  const recentSessions=[...new Set((data.attendance||[]).filter(a=>a.status==='Present').map(a=>`${a.date}|${a.service}`))].sort().reverse().slice(0,8);
+  const activeNames=new Set(activeMembers.map(m=>m.name));
+  const presentNames=new Set((data.attendance||[]).filter(a=>a.status==='Present' && recentSessions.includes(`${a.date}|${a.service}`)).map(a=>a.person_name));
+  const engaged=activeMembers.filter(m=>presentNames.has(m.name)).length;
+  const engagementRate=activeMembers.length ? Math.round(engaged/activeMembers.length*100) : 0;
+  const followupsOpen=(data.follow_ups||[]).filter(f=>['Open','In Progress'].includes(f.status)).length;
+  const prayerOpen=(data.prayer_requests||[]).filter(p=>!['Answered','Closed'].includes(p.status)).length;
+  const visitorsMonth=(data.visitors||[]).filter(v=>key(v.visit_date)===key(now.toISOString())).length;
+  const showFinance=can(role,'giving','read');
+  const financeMonth=labels.map(k=>{
+    const giving=(data.giving||[]).filter(g=>key(g.date)===k).reduce((n,g)=>n+Number(g.amount||0),0);
+    const offering=(data.offering_entries||[]).filter(g=>key(g.date)===k).reduce((n,g)=>n+Number(g.amount||0),0);
+    return {month:k,giving,offering,total:giving+offering};
+  });
+  const downloadReport=()=>download(`advanced-report-${today()}.json`,JSON.stringify({generatedAt:new Date().toISOString(),periodMonths:months,summary:{activeMembers:activeMembers.length,engagementRate,openFollowUps:followupsOpen,openPrayerRequests:prayerOpen,visitorsThisMonth:visitorsMonth},monthlyAttendance:monthRows,monthlyFinance:showFinance?financeMonth:[]},null,2),'application/json');
+  return <>
+    <div className="top"><div><h1>Advanced Reports</h1><div className="muted">Leadership overview of attendance, engagement, events and follow-up activity.</div></div><div className="btnrow"><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select><button className="secondary" onClick={downloadReport}>Export report</button></div></div>
+    <div className="cards">
+      <div className="card"><span className="label">Active members</span><strong>{activeMembers.length}</strong></div>
+      <div className="card"><span className="label">Recent engagement</span><strong>{engagementRate}%</strong><span className="muted sm">present in recent services</span></div>
+      <div className="card"><span className="label">Open follow-ups</span><strong>{followupsOpen}</strong></div>
+      <div className="card"><span className="label">Open prayer requests</span><strong>{prayerOpen}</strong></div>
+      <div className="card"><span className="label">Visitors this month</span><strong>{visitorsMonth}</strong></div>
+    </div>
+    <div className="panel"><h2>Attendance trend</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Present</th><th>Visitors</th><th>Absent</th><th>Recorded services</th></tr></thead><tbody>{monthRows.map(r=><tr key={r.month}><td>{r.month}</td><td>{r.present}</td><td>{r.visitor}</td><td>{r.absent}</td><td>{r.sessions}</td></tr>)}</tbody></table></div></div>
+    <div className="grid2">
+      <div className="panel"><h2>Event activity</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Events</th><th>Registrations</th></tr></thead><tbody>{monthRows.map(r=><tr key={r.month}><td>{r.month}</td><td>{r.events}</td><td>{r.registrations}</td></tr>)}</tbody></table></div></div>
+      {showFinance&&<div className="panel"><h2>Finance trend</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Giving</th><th>Offering</th><th>Total</th></tr></thead><tbody>{financeMonth.map(r=><tr key={r.month}><td>{r.month}</td><td>{money(r.giving)}</td><td>{money(r.offering)}</td><td><b>{money(r.total)}</b></td></tr>)}</tbody></table></div></div>}
+    </div>
+    <div className="panel"><h2>Recent service engagement</h2><p className="muted">Active members: {activeMembers.length}. Members appearing as Present in at least one of the last {recentSessions.length} recorded services: {engaged}.</p><div className="tablewrap"><table><thead><tr><th>Member</th><th>Status</th><th>Recent attendance</th></tr></thead><tbody>{activeMembers.filter(m=>recentSessions.length && !presentNames.has(m.name)).slice(0,50).map(m=><tr key={m.id}><td>{m.name}</td><td>{m.status}</td><td className="muted">No Present mark in recent recorded services</td></tr>)}{(!recentSessions.length||!activeMembers.some(m=>!presentNames.has(m.name)))&&<tr><td colSpan="3" className="empty">No engagement gaps to display from the available attendance records.</td></tr>}</tbody></table></div></div>
+  </>;
+}
+
+export function Branches() {
+  const { role } = useAuth();
+  if (role !== 'admin') return <div className="panel"><h2>Branches</h2><p className="muted">Only administrators have access to branch management.</p></div>;
+  return <Crud table="branches" title="Church Branches" noun="branch" sortKey="name" searchKeys={['name','code','city']} defaults={{status:'Active'}} fields={[
+    {key:'name',label:'Branch name',required:true},{key:'code',label:'Branch code',required:true},{key:'city',label:'City / town'},{key:'phone',label:'Phone',type:'tel'},{key:'address',label:'Address',full:true},{key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true}
+  ]} columns={[{label:'Name',render:r=><><b>{r.name}</b><br/><small>{r.code}</small></>},{label:'City',key:'city'},{label:'Phone',key:'phone'},{label:'Status',render:r=>badge(r.status)}]} />;
+}
