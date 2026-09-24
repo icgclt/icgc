@@ -114,3 +114,20 @@ Run `supabase/migration_08_recurring_events.sql`. In Events, choose `Every week`
 
 ## V12
 Run `supabase/migration_12_member_engagement.sql` after the earlier migrations. V12 adds digital giving records, printable receipts, communication templates and an engagement message queue. Actual SMS, WhatsApp and email delivery requires a connected provider.
+
+
+## V13
+
+New modules:
+- Finance Reconciliation for daily system-versus-verified amount checks.
+- Automation Center for birthday and new-visitor message queue creation.
+- Communication placeholders: `{{name}}` and `{{church}}`.
+- Finance reconciliation RLS and unique daily records.
+
+Run `supabase/migration_13_finance_automation.sql` after migration 12.
+
+The application remains provider-neutral for SMS, WhatsApp, email and payment gateways. Connect a provider before sending or charging real transactions.
+
+
+## V14
+Added Advanced Reports and a multi-branch foundation. Run `supabase/migration_14_advanced_reports_branches.sql` after migration 13. Branch records are administered by admins. Existing records keep a NULL branch until assigned.
