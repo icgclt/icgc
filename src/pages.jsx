@@ -1549,3 +1549,71 @@ export function EngagementAutomation() {
     />
   </>;
 }
+
+
+/* ---------------- V13 Finance Reconciliation + Engagement ---------------- */
+export function FinanceReconciliation() {
+  const { data, save } = useData();
+  const { role } = useAuth();
+  if (!['admin','finance'].includes(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
+  const [date,setDate]=useState(today());
+  const [method,setMethod]=useState('All');
+  const [note,setNote]=useState('');
+  const rows=(data.payment_receipts||[]).filter(r=>String(r.paid_at||r.created_at).slice(0,10)===date && r.status==='Paid' && (method==='All'||r.method===method));
+  const giving=(data.giving||[]).filter(r=>String(r.date).slice(0,10)===date);
+  const offerings=(data.offering_entries||[]).filter(r=>String(r.date).slice(0,10)===date);
+  const digital=rows.reduce((n,r)=>n+Number(r.amount||0),0);
+  const manualGiving=giving.reduce((n,r)=>n+Number(r.amount||0),0);
+  const manualOffering=offerings.reduce((n,r)=>n+Number(r.amount||0),0);
+  const total=digital+manualGiving+manualOffering;
+  const existing=(data.finance_reconciliations||[]).find(r=>r.date===date && r.method_filter===method);
+  const [counted,setCounted]=useState(existing?.counted_amount ?? '');
+  useEffect(()=>setCounted(existing?.counted_amount ?? ''),[existing?.id,existing?.counted_amount,date,method]);
+  const difference=Number(counted||0)-total;
+  function saveRec(){
+    save('finance_reconciliations',{id:existing?.id||uuid(),date,method_filter:method,system_amount:Number(total.toFixed(2)),counted_amount:Number(counted||0),difference:Number(difference.toFixed(2)),notes:note||existing?.notes||'',status:Math.abs(difference)<0.01?'Balanced':'Needs Review'});
+    alert(Math.abs(difference)<0.01?'Reconciliation saved as balanced.':'Reconciliation saved for review.');
+  }
+  return <>
+    <div className="top"><div><h1>Finance Reconciliation</h1><div className="muted">Compare recorded income with the amount physically or electronically verified for a selected day.</div></div></div>
+    <div className="panel"><div className="toolbar"><div className="fld"><small>Date</small><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div><div className="fld"><small>Payment method</small><select value={method} onChange={e=>setMethod(e.target.value)}><option>All</option><option>Mobile Money</option><option>Bank</option><option>Card</option><option>Cash</option></select></div></div></div>
+    <div className="cards"><div className="card"><span className="label">Digital receipts</span><strong>{money(digital)}</strong></div><div className="card"><span className="label">Manual giving</span><strong>{money(manualGiving)}</strong></div><div className="card"><span className="label">Offerings</span><strong>{money(manualOffering)}</strong></div><div className="card"><span className="label">System total</span><strong>{money(total)}</strong></div></div>
+    <div className="panel"><h2>Reconcile</h2><div className="formgrid"><div><label>Verified amount (GHS)</label><input type="number" min="0" step="0.01" value={counted} onChange={e=>setCounted(e.target.value)} /></div><div><label>Difference</label><input readOnly value={Number.isFinite(difference)?`GH₵ ${difference.toFixed(2)}`:''} /></div><div className="full"><label>Notes</label><textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Optional reconciliation note" /></div></div><div className="toolbar"><button className="primary" onClick={saveRec}>Save reconciliation</button>{existing&&badge(existing.status)}</div></div>
+    <div className="panel"><h2>Recorded transactions</h2><div className="tablewrap"><table><thead><tr><th>Source</th><th>Reference</th><th>Member / donor</th><th>Method</th><th>Amount</th></tr></thead><tbody>
+      {rows.map(r=><tr key={r.id}><td>Digital receipt</td><td>{r.reference||r.receipt_number||''}</td><td>{r.member_name||'Anonymous'}</td><td>{r.method}</td><td>{money(r.amount)}</td></tr>)}
+      {giving.map(r=><tr key={'g'+r.id}><td>Giving</td><td>{r.reference||''}</td><td>{r.member_name||''}</td><td>{r.method||'Cash'}</td><td>{money(r.amount)}</td></tr>)}
+      {offerings.map(r=><tr key={'o'+r.id}><td>Offering</td><td>{r.reference||''}</td><td>{r.person_name||''}</td><td>{r.method||'Cash'}</td><td>{money(r.amount)}</td></tr>)}
+      {!rows.length&&!giving.length&&!offerings.length&&<tr><td colSpan="5" className="empty">No recorded transactions for this date.</td></tr>}
+    </tbody></table></div></div>
+  </>;
+}
+
+export function AutomationCenter() {
+  const { data, save } = useData();
+  const { role } = useAuth();
+  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  const [channel,setChannel]=useState('SMS');
+  const [runMsg,setRunMsg]=useState('');
+  const templates=(data.communication_templates||[]).filter(t=>t.active);
+  const birthdayTemplate=templates.find(t=>t.audience==='Birthdays' && t.channel===channel);
+  const visitorTemplate=templates.find(t=>t.audience==='New Visitors' && t.channel===channel);
+  const todayKey=today();
+  const birthdays=(data.members||[]).filter(m=>m.dob && String(m.dob).slice(5)===todayKey.slice(5) && m.phone);
+  const recentVisitors=(data.visitors||[]).filter(v=>String(v.visit_date||'').slice(0,7)===todayKey.slice(0,7) && v.phone);
+  const alreadyQueued=new Set((data.communication_queue||[]).filter(q=>q.status!=='Cancelled').map(q=>`${q.trigger_type}:${q.member_id||q.member_name}:${String(q.scheduled_for||'').slice(0,10)}`));
+  const enqueue=(m,template,type,body)=>{
+    const key=`${type}:${m.id||m.name}:${todayKey}`;
+    if(alreadyQueued.has(key)) return false;
+    save('communication_queue',{id:uuid(),member_id:m.id||null,member_name:m.name||m.full_name||'',phone:m.phone||'',channel,template_id:template?.id||null,trigger_type:type,scheduled_for:new Date().toISOString(),status:'Queued',message:body});
+    return true;
+  };
+  const personalize=(body,m)=>String(body||'').replaceAll('{{name}}',m.name||m.full_name||'Member').replaceAll('{{church}}',import.meta.env.VITE_CHURCH_NAME||'Church');
+  function queueBirthdays(){let n=0;birthdays.forEach(m=>{if(birthdayTemplate&&enqueue(m,birthdayTemplate,'Birthday',personalize(birthdayTemplate.body,m)))n++;});setRunMsg(`${n} birthday message${n===1?'':'s'} queued.`);}
+  function queueVisitors(){let n=0;recentVisitors.forEach(v=>{const m={id:null,name:v.name,phone:v.phone};if(visitorTemplate&&enqueue(m,visitorTemplate,'New Visitor',personalize(visitorTemplate.body,m)))n++;});setRunMsg(`${n} visitor follow-up message${n===1?'':'s'} queued.`);}
+  return <>
+    <div className="top"><div><h1>Automation Center</h1><div className="muted">Prepare birthday and new-visitor messages without sending anything until a provider is connected.</div></div></div>
+    <div className="panel"><div className="toolbar"><div className="fld"><small>Channel</small><select value={channel} onChange={e=>setChannel(e.target.value)}><option>SMS</option><option>WhatsApp</option><option>Email</option><option>In-app</option></select></div><button className="primary" onClick={queueBirthdays} disabled={!birthdayTemplate}>Queue today's birthdays</button><button onClick={queueVisitors} disabled={!visitorTemplate}>Queue new visitor follow-up</button></div>{runMsg&&<p className="muted">{runMsg}</p>}<p className="muted sm">Templates use {{name}} and {{church}} placeholders. Queued messages stay in the Communication Queue until a connected provider sends them.</p></div>
+    <div className="cards"><div className="card"><span className="label">Birthdays today</span><strong>{birthdays.length}</strong></div><div className="card"><span className="label">Visitors this month</span><strong>{recentVisitors.length}</strong></div><div className="card"><span className="label">Active templates</span><strong>{templates.length}</strong></div><div className="card"><span className="label">Queued</span><strong>{(data.communication_queue||[]).filter(q=>q.status==='Queued').length}</strong></div></div>
+    <div className="grid2"><div className="panel"><h2>Today's birthdays</h2>{birthdays.length?birthdays.map(m=><div className="listrow" key={m.id}><b>{m.name}</b><span className="muted"> · {m.phone}</span></div>):<div className="empty">No birthdays with phone numbers today.</div>}</div><div className="panel"><h2>Recent visitors</h2>{recentVisitors.length?recentVisitors.slice(0,20).map(v=><div className="listrow" key={v.id}><b>{v.name}</b><span className="muted"> · {v.visit_date} · {v.phone}</span></div>):<div className="empty">No visitors with phone numbers this month.</div>}</div></div>
+  </>;
+}
