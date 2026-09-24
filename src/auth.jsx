@@ -35,6 +35,9 @@ export const PERMS = {
   group_attendance:       { read: READ_ALL, write: ['admin','secretary'], del: ['admin'] },
   volunteer_schedules:    { read: READ_ALL, write: ['admin','secretary'], del: ['admin'] },
   pledges:                { read: ['admin','finance'], write: ['admin','finance'], del: ['admin'] },
+  payment_receipts:       { read: ['admin','finance','secretary'], write: ['admin','finance'], del: ['admin'] },
+  communication_templates:{ read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
+  communication_queue:    { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
 };
 export const can = (role, table, action) => PERMS[table]?.[action]?.includes(role) || false;
 

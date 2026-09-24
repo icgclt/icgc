@@ -1503,3 +1503,49 @@ export function PastorDashboard() {
     <div className="panel"><h2>Pastoral priorities</h2><p><b>{openCases}</b> pastoral cases require attention.</p><p><b>{openFollow}</b> follow-ups are open or in progress.</p><p><b>{prayers}</b> prayer requests are active.</p><p className="muted sm">Use the Ministry and Follow-up sections to open each record.</p></div></div>
   </>;
 }
+
+/* ---------------- V12 Member Giving + Engagement Automation ---------------- */
+export function MemberGiving() {
+  const { data } = useData();
+  const { role } = useAuth();
+  if (!['admin','finance','secretary'].includes(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
+  const rows=[...(data.payment_receipts||[])].sort((a,b)=>String(b.paid_at||b.created_at).localeCompare(String(a.paid_at||a.created_at)));
+  const paid=rows.filter(r=>r.status==='Paid').reduce((a,r)=>a+Number(r.amount||0),0);
+  const pending=rows.filter(r=>r.status==='Pending').reduce((a,r)=>a+Number(r.amount||0),0);
+  const issueReceipt=(r)=>{
+    const receipt=r.receipt_number||`R-${String(r.id).replace(/-/g,'').slice(0,8).toUpperCase()}`;
+    const html=`<html><head><title>Church Receipt ${receipt}</title><style>body{font-family:Arial;padding:35px;max-width:650px;margin:auto}h1{text-align:center}hr{border:0;border-top:1px solid #ddd}.row{display:flex;justify-content:space-between;padding:9px 0}.total{font-size:24px;font-weight:700}</style></head><body><h1>${import.meta.env.VITE_CHURCH_NAME||'Church'}<br><small>Giving Receipt</small></h1><hr><div class="row"><b>Receipt</b><span>${receipt}</span></div><div class="row"><b>Member / donor</b><span>${r.member_name||'Anonymous'}</span></div><div class="row"><b>Fund</b><span>${r.fund||''}</span></div><div class="row"><b>Method</b><span>${r.method||''}${r.provider?' / '+r.provider:''}</span></div><div class="row"><b>Reference</b><span>${r.reference||''}</span></div><hr><div class="row total"><span>Amount</span><span>GH₵ ${Number(r.amount||0).toFixed(2)}</span></div><p>Paid: ${r.paid_at||r.created_at||''}</p><p style="color:#666">Thank you for your contribution.</p><script>window.print()</script></body></html>`;
+    const w=window.open('','_blank','width=760,height=800'); if(w){w.document.write(html);w.document.close();}
+  };
+  return <>
+    <div className="top"><div><h1>Member Giving & Receipts</h1><div className="muted">Track digital giving records and print official receipts.</div></div></div>
+    <div className="cards"><div className="card"><div className="label">Paid</div><div className="num">{money(paid)}</div></div><div className="card"><div className="label">Pending</div><div className="num">{money(pending)}</div></div><div className="card"><div className="label">Receipts</div><div className="num">{rows.length}</div></div></div>
+    <Crud table="payment_receipts" title="Digital Giving Records" noun="receipt" sortKey="paid_at" sortDir="desc" searchKeys={['member_name','reference','receipt_number','fund']} filters={[{key:'status',label:'All statuses',options:['Pending','Paid','Failed','Refunded']},{key:'method',label:'All methods',options:['Mobile Money','Bank','Card','Cash']}]}
+      defaults={{amount:0,fund:'Offering',method:'Mobile Money',status:'Paid'}}
+      fields={[{key:'member_name',label:'Member / donor',required:true},{key:'amount',label:'Amount (GHS)',type:'number',step:'0.01',gt:0,required:true},{key:'fund',label:'Fund',required:true},{key:'method',label:'Method',type:'select',options:['Mobile Money','Bank','Card','Cash'],required:true},{key:'provider',label:'Provider / bank'},{key:'reference',label:'Transaction reference'},{key:'receipt_number',label:'Receipt number'},{key:'status',label:'Status',type:'select',options:['Pending','Paid','Failed','Refunded'],required:true},{key:'paid_at',label:'Paid at',type:'datetime-local'},{key:'notes',label:'Notes',type:'textarea',full:true}]}
+      columns={[{label:'Member',key:'member_name'},{label:'Amount',render:r=>money(r.amount)},{label:'Fund',key:'fund'},{label:'Method',key:'method'},{label:'Reference',key:'reference'},{label:'Status',render:r=>badge(r.status)},{label:'Receipt',render:r=><button className="sm" onClick={()=>issueReceipt(r)}>Print</button>}]}
+    />
+  </>;
+}
+
+export function EngagementAutomation() {
+  const { data } = useData();
+  const { role } = useAuth();
+  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  const templates=[...(data.communication_templates||[])].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
+  const queue=[...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
+  const birthdayCount=data.members.filter(m=>m.dob && String(m.dob).slice(5)===today().slice(5)).length;
+  const visitorCount=data.visitors.filter(v=>String(v.visit_date||'').slice(0,7)===today().slice(0,7)).length;
+  return <>
+    <div className="top"><div><h1>Engagement Automation</h1><div className="muted">Prepare reusable messages and queue member follow-up. Sending requires a connected SMS, WhatsApp or email provider.</div></div></div>
+    <div className="cards"><div className="card"><div className="label">Birthdays today</div><div className="num">{birthdayCount}</div></div><div className="card"><div className="label">Visitors this month</div><div className="num">{visitorCount}</div></div><div className="card"><div className="label">Templates</div><div className="num">{templates.length}</div></div><div className="card"><div className="label">Queued messages</div><div className="num">{queue.filter(q=>q.status==='Queued').length}</div></div></div>
+    <Crud table="communication_templates" title="Message Templates" noun="template" sortKey="created_at" sortDir="desc" searchKeys={['name','body','audience']} filters={[{key:'channel',label:'All channels',options:['SMS','WhatsApp','Email','In-app']},{key:'audience',label:'All audiences',options:['All Members','Youth','Children','Men','Women','New Visitors','Birthdays']}]} defaults={{channel:'SMS',audience:'All Members',active:true}}
+      fields={[{key:'name',label:'Template name',required:true},{key:'channel',label:'Channel',type:'select',options:['SMS','WhatsApp','Email','In-app'],required:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','New Visitors','Birthdays'],required:true},{key:'subject',label:'Subject'},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'active',label:'Active',type:'checkbox'}]}
+      columns={[{label:'Name',key:'name'},{label:'Channel',key:'channel'},{label:'Audience',key:'audience'},{label:'Active',render:t=>badge(t.active?'Active':'Off')}]}
+    />
+    <Crud table="communication_queue" title="Message Queue" noun="message" sortKey="scheduled_for" sortDir="asc" searchKeys={['member_name','phone','message','trigger_type']} filters={[{key:'status',label:'All statuses',options:['Queued','Sent','Failed','Cancelled']},{key:'trigger_type',label:'All triggers',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder']}]} defaults={{channel:'SMS',status:'Queued',trigger_type:'Manual'}}
+      fields={[{key:'member_name',label:'Recipient name',required:true},{key:'phone',label:'Phone'},{key:'channel',label:'Channel',type:'select',options:['SMS','WhatsApp','Email','In-app'],required:true},{key:'trigger_type',label:'Trigger',type:'select',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder'],required:true},{key:'scheduled_for',label:'Scheduled for',type:'datetime-local'},{key:'status',label:'Status',type:'select',options:['Queued','Sent','Failed','Cancelled'],required:true},{key:'message',label:'Message',type:'textarea',required:true,full:true}]}
+      columns={[{label:'Recipient',key:'member_name'},{label:'Channel',key:'channel'},{label:'Trigger',key:'trigger_type'},{label:'Scheduled',key:'scheduled_for'},{label:'Status',render:q=>badge(q.status)}]}
+    />
+  </>;
+}
