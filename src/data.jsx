@@ -4,11 +4,13 @@ import { supabase } from './supabase';
 export const TABLES = [
   'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
   'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
-  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'volunteers', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'volunteer_schedules', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'branches', 'notification_campaigns', 'notification_logs', 'payment_requests', 'payment_webhook_events', 'member_notification_preferences',
+  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'notification_campaigns', 'notification_logs', 'payment_requests', 'payment_webhook_events', 'member_notification_preferences',
 ];
 
 // Financial records use sessionStorage rather than localStorage. This keeps sensitive giving/welfare
 // data out of the persistent browser profile while still allowing offline work during the session.
+const BRANCH_SCOPED_TABLES = new Set();
+
 const SENSITIVE_TABLES = new Set([
   'giving', 'offering_entries', 'member_contributions', 'welfare_transactions',
 ]);
@@ -203,13 +205,14 @@ export function DataProvider({ uid, role, children }) {
 
   const save = (table, row) => {
     const list = dataRef.current[table];
-    const existing = list.find((x) => x.id === row.id);
+    const scopedRow = row;
+    const existing = list.find((x) => x.id === scopedRow.id);
     const optimistic = existing
-      ? { ...existing, ...row }
-      : { created_at: new Date().toISOString(), ...row };
-    commit(table, existing ? list.map((x) => (x.id === row.id ? optimistic : x)) : [...list, optimistic]);
+      ? { ...existing, ...scopedRow }
+      : { created_at: new Date().toISOString(), ...scopedRow };
+    commit(table, existing ? list.map((x) => (x.id === scopedRow.id ? optimistic : x)) : [...list, optimistic]);
     setOutbox([...outboxRef.current, {
-      op: 'upsert', table, row,
+      op: 'upsert', table, row: scopedRow,
       expectedUpdatedAt: existing?.updated_at || null,
     }]);
     syncRef.current(false);

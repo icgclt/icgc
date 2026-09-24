@@ -5,9 +5,9 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings, EventAttendance, ServiceTimer,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn, FinanceCenter, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, Branches, NotificationCenter, MobileMoneyPayments, DeliveryCenter,
+  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter,
 } from './pages';
-import { MemberCards, DepartmentDashboard, GroupDashboard, VolunteerSchedule, EventRegistration } from './operational';
+import { MemberCards, DepartmentDashboard, EventRegistration } from './operational';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
 
@@ -162,7 +162,8 @@ const NAV = [
   { group: 'ministry', label: '⛪ Ministry', items: [
     ['groups', 'Groups / House Fellowships', Groups, 'groups'],
     ['prayer', 'Prayer Requests', PrayerRequests, 'prayer_requests'],
-    ['volunteers', 'Volunteers', Volunteers, 'volunteers'],
+    ['departments', 'Departments', Departments, 'departments'],
+    ['deptdashboard', 'Department Dashboard', DepartmentDashboard, 'departments'],
     ['serviceplans', 'Service Plans', ServicePlans, 'service_plans'],
     ['pastoral', 'Pastoral Care', PastoralCare, 'pastoral_cases'],
   ] },
@@ -171,38 +172,34 @@ const NAV = [
     ['quickattendance', 'Quick Attendance', QuickAttendance, 'attendance'],
     ['headcount', 'Headcount Attendance', HeadcountAttendance, 'attendance_headcount'],
   ] },
+  { group: 'events', label: '📅 Events', items: [
+    ['events', 'Events', Events, 'events'],
+    ['eventregistration', 'Event Registration', EventRegistration, 'events'],
+    ['eventattendance', 'Event Attendance', EventAttendance, 'attendance'],
+  ] },
   { group: 'finance', label: '💰 Finance', items: [
     ['giving', 'Giving', Giving, 'giving'],
     ['offerings', 'Offerings', Offerings, 'offering_entries'],
-    ['firstfruit', 'First Fruit', FirstFruit, 'member_contributions'],
+    ['firstfruit', 'First Fruit / Contributions', FirstFruit, 'member_contributions'],
+    ['membergiving', 'Digital Receipts', MemberGiving, 'payment_receipts'],
+    ['mobilemoney', 'Mobile Money Payments', MobileMoneyPayments, 'payment_requests'],
+    ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'finance_reconciliations'],
   ] },
   { group: 'welfare', label: '🤝 Welfare', items: [
     ['welfaremembers', 'Welfare Members', WelfareMembers, 'welfare_members'],
     ['welfaredues', 'Welfare Dues', WelfareDues, 'member_contributions'],
     ['welfarefund', 'Welfare Fund', WelfareFund, 'welfare_transactions'],
   ] },
-  ['departments', '🏛 Departments', Departments, 'departments'],
-  ['deptdashboard', '📋 Department Dashboard', DepartmentDashboard, 'departments'],
-  ['groupdashboard', '🏘 Group Dashboard', GroupDashboard, 'groups'],
-  ['volunteerschedule', '🗓 Volunteer Schedule', VolunteerSchedule, 'volunteers'],
-  ['eventregistration', '🎟 Event Registration', EventRegistration, 'events'],
-  ['events', '📅 Events', Events, 'events'],
-  ['eventattendance', '📋 Event Attendance', EventAttendance, 'attendance'],
   ['servicetimer', '⏱ Service Countdown Timer', ServiceTimer, 'service_plans'],
-  ['sms', '💬 Send SMS', SendSMS, 'members'],
-  ['pastordashboard', '🩺 Pastoral Dashboard', PastorDashboard, 'pastoral_cases'],
-  ['financecenter', '💳 Finance Center', FinanceCenter, 'pledges'],
-  ['financereconciliation', '🧾 Finance Reconciliation', FinanceReconciliation, 'finance_reconciliations'],
   ['communications', '📢 Communication Center', CommunicationCenter, 'announcements'],
   ['notifications', '📣 Notification Center', NotificationCenter, 'communication_queue'],
   ['deliverycenter', '🚚 Delivery Center', DeliveryCenter, 'communication_queue'],
-  ['membergiving', '💳 Member Giving & Receipts', MemberGiving, 'payment_receipts'],
-  ['mobilemoney', '📱 Mobile Money Payments', MobileMoneyPayments, 'payment_requests'],
   ['engagement', '🤖 Engagement Automation', EngagementAutomation, 'announcements'],
   ['automationcenter', '⚙️ Automation Center', AutomationCenter, 'communication_queue'],
   ['reports', '📈 Reports', Reports, null],
   ['advancedreports', '📊 Advanced Reports', AdvancedReports, null],
-  ['branches', '🏢 Branches', Branches, 'ADMIN'],
+  ['pastordashboard', '🩺 Pastoral Dashboard', PastorDashboard, 'pastoral_cases'],
+  ['sms', '💬 Send SMS', SendSMS, 'members'],
   ['users', '🔑 Users', Users, 'ADMIN'],
   ['audit', '🧾 Audit Log', AuditLog, 'ADMIN'],
   ['settings', '⚙ Settings', Settings, null],

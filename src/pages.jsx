@@ -1096,7 +1096,7 @@ export function Users() {
   const { user } = useAuth();
   const [rows, setRows] = useState(null);
   const [msg, setMsg] = useState('');
-  const [dialog, setDialog] = useState(null); // { mode, target }
+  const [dialog, setDialog] = useState(null);
 
   const load = async () => {
     const { data, error } = await supabase.from('profiles').select('*').order('created_at');
@@ -1115,64 +1115,40 @@ export function Users() {
     try { await adminCall({ action: 'delete', user_id: p.id }); load(); } catch (ex) { setMsg(ex.message); }
   };
 
-  return (
-    <>
-      <div className="top">
-        <h1>Users</h1>
-        <div className="btnrow">
-          <button className="secondary" onClick={load}>Refresh</button>
-          <button className="primary" onClick={() => setDialog({ mode: 'create' })}>+ Create user</button>
-        </div>
-      </div>
-      <div className="panel">
-        <p className="muted">
-          Create accounts here and choose each person's role, or approve people who signed up themselves (they show as <b>pending</b>).
-          <br /><b>admin</b>: everything · <b>finance</b>: giving + read others · <b>secretary</b>: members, attendance, departments, events · <b>viewer</b>: read-only (no giving).
-        </p>
-        {msg && <div className="err">{msg}</div>}
-        <div className="tablewrap"><table>
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
-          <tbody>
-            {(rows || []).map((p) => (
-              <tr key={p.id}>
-                <td><b>{p.full_name || '—'}</b></td>
-                <td>{p.email}</td>
-                <td>
-                  <select value={p.role} disabled={p.id === user.id} onChange={(e) => change(p.id, e.target.value)}>
-                    {ROLES.map((r) => <option key={r}>{r}</option>)}
-                  </select>
-                </td>
-                <td>{String(p.created_at).slice(0, 10)}</td>
-                <td className="actions">
-                  <button className="secondary" onClick={() => setDialog({ mode: 'reset', target: p })}>Reset password</button>
-                  {p.id !== user.id && <button className="danger" onClick={() => remove(p)}>Delete</button>}
-                </td>
-              </tr>
-            ))}
-            {rows && !rows.length && <tr><td colSpan="5" className="empty">No users.</td></tr>}
-            {!rows && <tr><td colSpan="5" className="empty">Loading…</td></tr>}
-          </tbody>
-        </table></div>
-      </div>
-      {dialog && <UserDialog {...dialog} onClose={() => setDialog(null)} onDone={load} />}
-    </>
-  );
+  return <>
+    <div className="top">
+      <h1>Users</h1>
+      <div className="btnrow"><button className="secondary" onClick={load}>Refresh</button><button className="primary" onClick={() => setDialog({ mode: 'create' })}>+ Create user</button></div>
+    </div>
+    <div className="panel">
+      <p className="muted">Create accounts here and choose each person's role, or approve people who signed up themselves. This church uses a single-church structure, so there is no branch assignment.</p>
+      {msg && <div className="err">{msg}</div>}
+      <div className="tablewrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+        <tbody>{(rows || []).map((p) => <tr key={p.id}>
+          <td><b>{p.full_name || '—'}</b></td><td>{p.email}</td>
+          <td><select value={p.role} disabled={p.id === user.id} onChange={(e) => change(p.id, e.target.value)}>{ROLES.map(r => <option key={r}>{r}</option>)}</select></td>
+          <td>{String(p.created_at).slice(0, 10)}</td>
+          <td className="actions"><button className="secondary" onClick={() => setDialog({ mode: 'reset', target: p })}>Reset password</button>{p.id !== user.id && <button className="danger" onClick={() => remove(p)}>Delete</button>}</td>
+        </tr>)}
+        {rows && !rows.length && <tr><td colSpan="5" className="empty">No users.</td></tr>}
+        {!rows && <tr><td colSpan="5" className="empty">Loading…</td></tr>}</tbody>
+      </table></div>
+    </div>
+    {dialog && <UserDialog {...dialog} onClose={() => setDialog(null)} onDone={load} />}
+  </>;
 }
 
-
-/* ---------------- Ministry operations ---------------- */
 export function Visitors() {
-  return <Crud table="visitors" title="Visitors" noun="visitor" sortKey="visit_date" sortDir="desc"
-    searchKeys={['name','phone','invited_by','assigned_to']}
-    filters={[{ key:'follow_up_status', label:'All follow-up statuses', options:['New','Contacted','Visited','Connected','Closed'] }]}
-    defaults={{ visit_date: today(), follow_up_status:'New' }}
+  return <Crud table="visitors" title="Visitors" noun="visitor" sortKey="visit_date" sortDir="desc" searchKeys={['name','phone','email','source','notes']}
+    filters={[{key:'status',label:'All statuses',options:['New','Contacted','Connected','Not Connected','Member']},{key:'visit_type',label:'All visit types',options:['First Visit','Returning Visitor','Special Service','Event','Other'] }]}
+    defaults={{visit_date:today(),status:'New',visit_type:'First Visit'}}
     fields={[
-      {key:'visit_date',label:'Visit date',type:'date',required:true},{key:'name',label:'Name',required:true},{key:'phone',label:'Phone',type:'tel'},
-      {key:'gender',label:'Gender',type:'select',options:['Male','Female']},{key:'invited_by',label:'Invited by'},{key:'address',label:'Address'},
-      {key:'prayer_request',label:'Prayer request',type:'textarea',full:true},{key:'follow_up_status',label:'Follow-up status',type:'select',options:['New','Contacted','Visited','Connected','Closed'],required:true},
-      {key:'assigned_to',label:'Follow-up officer'},{key:'notes',label:'Notes',type:'textarea',full:true}
+      {key:'visit_date',label:'Visit date',type:'date',required:true},{key:'name',label:'Full name',required:true},{key:'phone',label:'Phone',type:'tel'},{key:'email',label:'Email',type:'email'},
+      {key:'gender',label:'Gender',type:'select',options:['Male','Female']},{key:'visit_type',label:'Visit type',type:'select',options:['First Visit','Returning Visitor','Special Service','Event','Other'],required:true},
+      {key:'source',label:'How did they hear about us?'},{key:'address',label:'Address',full:true},{key:'status',label:'Status',type:'select',options:['New','Contacted','Connected','Not Connected','Member'],required:true},
+      {key:'notes',label:'Notes',type:'textarea',full:true}
     ]}
-    columns={[{label:'Date',key:'visit_date'},{label:'Visitor',render:r=><><b>{r.name}</b><br/><small>{r.phone||'No phone'}</small></>},{label:'Invited by',key:'invited_by'},{label:'Follow-up',render:r=>badge(r.follow_up_status)},{label:'Officer',key:'assigned_to'}]}/>
+    columns={[{label:'Date',key:'visit_date'},{label:'Visitor',render:r=><><b>{r.name}</b><br/><small>{r.phone||'No phone'}</small></>},{label:'Visit type',key:'visit_type'},{label:'Status',render:r=>badge(r.status)},{label:'Source',key:'source'}]}/>
 }
 
 export function Groups() {
@@ -1215,17 +1191,6 @@ export function PrayerRequests() {
     columns={[{label:'Date',key:'date'},{label:'Requester',key:'requester'},{label:'Request',render:r=><span title={r.request}>{String(r.request||'').slice(0,70)}{String(r.request||'').length>70?'…':''}</span>},{label:'Assigned',key:'assigned_to'},{label:'Status',render:r=>badge(r.status)}]}/>
 }
 
-export function Volunteers() {
-  return <Crud table="volunteers" title="Volunteers" noun="volunteer" sortKey="person_name" searchKeys={['person_name','ministry','role_name','phone']}
-    filters={[{key:'status',label:'All statuses',options:['Active','Inactive']}]}
-    defaults={{status:'Active'}}
-    fields={[
-      {key:'person_name',label:'Person',required:true},{key:'ministry',label:'Ministry / department',required:true},{key:'role_name',label:'Role'},
-      {key:'phone',label:'Phone',type:'tel'},{key:'availability',label:'Availability'},{key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true},
-      {key:'notes',label:'Notes',type:'textarea',full:true}
-    ]}
-    columns={[{label:'Person',key:'person_name'},{label:'Ministry',key:'ministry'},{label:'Role',key:'role_name'},{label:'Phone',key:'phone'},{label:'Status',render:r=>badge(r.status)}]}/>
-}
 
 export function ServicePlans() {
   return <Crud table="service_plans" title="Service Plans" noun="service item" sortKey="service_date" searchKeys={['service_name','service_item','assigned_to']}
@@ -1678,18 +1643,6 @@ export function AdvancedReports() {
   </>;
 }
 
-export function Branches() {
-  const { role } = useAuth();
-  if (role !== 'admin') return <div className="panel"><h2>Branches</h2><p className="muted">Only administrators have access to branch management.</p></div>;
-  return <Crud table="branches" title="Church Branches" noun="branch" sortKey="name" searchKeys={['name','code','city']} defaults={{status:'Active'}} fields={[
-    {key:'name',label:'Branch name',required:true},{key:'code',label:'Branch code',required:true},{key:'city',label:'City / town'},{key:'phone',label:'Phone',type:'tel'},{key:'address',label:'Address',full:true},{key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true}
-  ]} columns={[{label:'Name',render:r=><><b>{r.name}</b><br/><small>{r.code}</small></>},{label:'City',key:'city'},{label:'Phone',key:'phone'},{label:'Status',render:r=>badge(r.status)}]} />;
-}
-
-
-
-
-/* ---------------- V16 Mobile Money Payments ---------------- */
 export function MobileMoneyPayments() {
   const { data, save } = useData();
   const { role } = useAuth();
