@@ -1437,3 +1437,69 @@ export function MemberCheckIn() {
     <div className="panel"><h2>Recent check-ins</h2>{recent.map((r,i)=><div className="listrow" key={i}><b>{r.name}</b><span className="muted"> · {r.code} · {r.time}</span></div>)}{!recent.length&&<p className="muted">No check-ins recorded in this browser session.</p>}</div>
   </>;
 }
+
+/* ---------------- Major Modules V11 ---------------- */
+export function FinanceCenter() {
+  const { data } = useData();
+  const { role } = useAuth();
+  if (!can(role, 'pledges', 'read')) return <div className="panel"><h2>Finance Center</h2><p className="muted">Finance access is restricted.</p></div>;
+  const totalPledged = data.pledges.reduce((a,p)=>a+Number(p.pledged_amount||0),0);
+  const totalPaid = data.pledges.reduce((a,p)=>a+Number(p.paid_amount||0),0);
+  const balance = totalPledged-totalPaid;
+  const activeProjects = [...new Set(data.pledges.map(p=>p.project).filter(Boolean))];
+  return <>
+    <div className="top"><div><h1>Finance Center</h1><div className="muted">Giving, pledges and project commitments in one place.</div></div></div>
+    <div className="cards">
+      <div className="card"><div className="label">Total pledged</div><div className="num" style={{fontSize:22}}>{money(totalPledged)}</div></div>
+      <div className="card"><div className="label">Paid</div><div className="num" style={{fontSize:22}}>{money(totalPaid)}</div></div>
+      <div className="card"><div className="label">Outstanding</div><div className="num" style={{fontSize:22}}>{money(balance)}</div></div>
+      <div className="card"><div className="label">Projects</div><div className="num">{activeProjects.length}</div></div>
+    </div>
+    <Crud table="pledges" title="Pledges and Projects" noun="pledge" sortKey="created_at" sortDir="desc" searchKeys={['member_name','project','reference']}
+      filters={[{key:'status',label:'All statuses',options:['Open','Part-paid','Paid','Cancelled']}]} defaults={{status:'Open',pledged_amount:0,paid_amount:0,currency:'GHS'}}
+      fields={[
+        {key:'member_name',label:'Member / donor',required:true},{key:'project',label:'Project / fund',required:true},{key:'pledged_amount',label:'Pledged amount',type:'number',required:true},{key:'paid_amount',label:'Amount paid',type:'number'},
+        {key:'pledge_date',label:'Pledge date',type:'date'},{key:'due_date',label:'Due date',type:'date'},{key:'status',label:'Status',type:'select',options:['Open','Part-paid','Paid','Cancelled'],required:true},{key:'reference',label:'Reference / receipt'},
+        {key:'notes',label:'Notes',type:'textarea',full:true}
+      ]}
+      columns={[{label:'Member',key:'member_name'},{label:'Project',key:'project'},{label:'Pledged',render:p=>money(p.pledged_amount)},{label:'Paid',render:p=>money(p.paid_amount)},{label:'Balance',render:p=>money(Number(p.pledged_amount||0)-Number(p.paid_amount||0))},{label:'Status',render:p=>badge(p.status)}]}
+    />
+  </>;
+}
+
+export function CommunicationCenter() {
+  const { data } = useData();
+  const { role } = useAuth();
+  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  const active = data.members.filter(m=>m.status==='Active' && m.phone).length;
+  const announcements = [...data.announcements].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))).slice(0,8);
+  return <>
+    <div className="top"><div><h1>Communication Center</h1><div className="muted">Manage church announcements and prepare targeted member communication.</div></div></div>
+    <div className="cards"><div className="card"><div className="label">Active members with phone</div><div className="num">{active}</div></div><div className="card"><div className="label">Announcements</div><div className="num">{data.announcements.length}</div></div></div>
+    <Crud table="announcements" title="Church Announcements" noun="announcement" sortKey="created_at" sortDir="desc" searchKeys={['title','body','audience']} defaults={{audience:'All Members',status:'Published'}}
+      filters={[{key:'status',label:'All statuses',options:['Draft','Published','Archived']},{key:'audience',label:'All audiences',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']} ]}
+      fields={[{key:'title',label:'Title',required:true},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']},{key:'publish_date',label:'Publish date',type:'date'},{key:'status',label:'Status',type:'select',options:['Draft','Published','Archived'],required:true},{key:'expires_date',label:'Expires',type:'date'}]}
+      columns={[{label:'Title',key:'title'},{label:'Audience',key:'audience'},{label:'Publish',key:'publish_date'},{label:'Status',render:a=>badge(a.status)}]}
+    />
+    <div className="panel"><h2>Latest announcements</h2>{announcements.length?announcements.map(a=><p key={a.id}><b>{a.title}</b><br/><span className="muted">{a.audience} · {a.status}</span></p>):<div className="empty">No announcements yet.</div>}</div>
+  </>;
+}
+
+export function PastorDashboard() {
+  const { data } = useData();
+  const { role } = useAuth();
+  if (!['admin','secretary','viewer'].includes(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
+  const openCases=data.pastoral_cases.filter(x=>!['Closed','Resolved'].includes(x.status)).length;
+  const openFollow=data.follow_ups.filter(x=>['Open','In Progress'].includes(x.status)).length;
+  const prayers=data.prayer_requests.filter(x=>!['Answered','Closed'].includes(x.status)).length;
+  const visitors=data.visitors.filter(x=>String(x.visit_date||'').slice(0,7)===today().slice(0,7)).length;
+  const active=data.members.filter(x=>x.status==='Active').length;
+  const lastDates=[...new Set(data.attendance.map(a=>a.date))].sort().reverse().slice(0,6);
+  const trend=lastDates.map(d=>({date:d,present:data.attendance.filter(a=>a.date===d&&a.status==='Present').length}));
+  return <>
+    <div className="top"><div><h1>Pastoral Dashboard</h1><div className="muted">A leadership view of people, care and engagement.</div></div></div>
+    <div className="cards"><div className="card"><div className="label">Active members</div><div className="num">{active}</div></div><div className="card"><div className="label">Open follow-ups</div><div className="num">{openFollow}</div></div><div className="card"><div className="label">Open pastoral cases</div><div className="num">{openCases}</div></div><div className="card"><div className="label">Prayer requests</div><div className="num">{prayers}</div></div><div className="card"><div className="label">Visitors this month</div><div className="num">{visitors}</div></div></div>
+    <div className="grid2"><div className="panel"><h2>Recent attendance trend</h2>{trend.length?<div className="tablewrap"><table><thead><tr><th>Date</th><th>Present</th></tr></thead><tbody>{trend.map(x=><tr key={x.date}><td>{x.date}</td><td><b>{x.present}</b></td></tr>)}</tbody></table></div>:<div className="empty">No attendance records.</div>}</div>
+    <div className="panel"><h2>Pastoral priorities</h2><p><b>{openCases}</b> pastoral cases require attention.</p><p><b>{openFollow}</b> follow-ups are open or in progress.</p><p><b>{prayers}</b> prayer requests are active.</p><p className="muted sm">Use the Ministry and Follow-up sections to open each record.</p></div></div>
+  </>;
+}

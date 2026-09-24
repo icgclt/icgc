@@ -34,6 +34,7 @@ export const PERMS = {
   group_members:          { read: READ_ALL, write: ['admin','secretary'], del: ['admin'] },
   group_attendance:       { read: READ_ALL, write: ['admin','secretary'], del: ['admin'] },
   volunteer_schedules:    { read: READ_ALL, write: ['admin','secretary'], del: ['admin'] },
+  pledges:                { read: ['admin','finance'], write: ['admin','finance'], del: ['admin'] },
 };
 export const can = (role, table, action) => PERMS[table]?.[action]?.includes(role) || false;
 
