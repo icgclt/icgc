@@ -107,3 +107,6 @@ New modules:
 - Member ID check-in using the existing member code
 
 The member code is stable and suitable for printing on a membership card. A camera-based QR reader can be added later without changing the attendance data model.
+
+### V8 recurring events
+Run `supabase/migration_08_recurring_events.sql`. In Events, choose `Every week` and select the date through which the weekly series should run. The system creates one event occurrence for each week, so registrations and future event attendance work against real event records.
