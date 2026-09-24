@@ -1,5 +1,5 @@
 // Offline shell: the app itself loads without internet. Data caching is handled inside the app (src/data.jsx).
-const CACHE = 'church-app-v1';
+const CACHE = 'church-app-v13';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(
