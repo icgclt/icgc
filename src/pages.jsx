@@ -468,6 +468,17 @@ export function EventAttendance() {
 
   const present = members.filter(m => statusMap[m.id] === 'Present').length;
   const absent = members.filter(m => statusMap[m.id] === 'Absent').length;
+  const seriesId = event?.series_id || event?.id;
+  const seriesEvents = useMemo(() => {
+    if (!event) return [];
+    return [...(data.events || [])].filter(e => (e.series_id || e.id) === seriesId && String(e.date) <= today()).sort((a,b) => String(a.date).localeCompare(String(b.date)));
+  }, [data.events, event, seriesId]);
+  const seriesReport = seriesEvents.map(e => {
+    const rows = (data.attendance || []).filter(a => a.event_id === e.id);
+    return {...e, presentCount: rows.filter(a=>a.status==='Present').length, absentCount: rows.filter(a=>a.status==='Absent').length, visitorCount: rows.filter(a=>a.status==='Visitor').length};
+  });
+  const seriesTotalPresent = seriesReport.reduce((n,r)=>n+r.presentCount,0);
+  const seriesAvg = seriesReport.length ? Math.round(seriesTotalPresent / seriesReport.length) : 0;
 
   return <>
     <div className="top"><div><h1>Event Attendance</h1><div className="muted">Record attendance separately for each event occurrence. Weekly events have separate attendance records.</div></div></div>
@@ -482,7 +493,31 @@ export function EventAttendance() {
       {members.map(m => <tr key={m.id}><td><b>{m.name}</b><br/><small>{m.member_code || ''}</small></td><td>{m.phone || ''}</td><td>{statusMap[m.id] ? badge(statusMap[m.id]) : <span className="muted">Not marked</span>}</td><td>{canWrite && <button onClick={() => toggle(m.id)}>{statusMap[m.id] === 'Present' ? 'Mark absent' : 'Mark present'}</button>}</td></tr>)}
       {!members.length && <tr><td colSpan="4" className="empty">No members found for this occurrence.</td></tr>}
     </tbody></table></div></div>}
+    {event && <div className="panel"><div className="top"><div><h2 style={{margin:0}}>Attendance report for this event series</h2><div className="muted">Each occurrence is shown separately.</div></div></div><div className="cards"><div className="card"><span className="label">Occurrences</span><strong>{seriesReport.length}</strong></div><div className="card"><span className="label">Total present</span><strong>{seriesTotalPresent}</strong></div><div className="card"><span className="label">Average present</span><strong>{seriesAvg}</strong></div></div><div className="tablewrap"><table><thead><tr><th>Date</th><th>Time</th><th>Present</th><th>Absent</th><th>Visitors</th><th></th></tr></thead><tbody>
+      {seriesReport.map(r=><tr key={r.id}><td>{r.date}</td><td>{r.event_time || ''}</td><td><b>{r.presentCount}</b></td><td>{r.absentCount}</td><td>{r.visitorCount}</td><td><button onClick={()=>setEventId(r.id)}>Open</button></td></tr>)}
+      {!seriesReport.length && <tr><td colSpan="6" className="empty">No occurrences found.</td></tr>}
+    </tbody></table></div></div>}
   </>;
+}
+
+/* ---------------- Service Timer ---------------- */
+export function ServiceTimer() {
+  const KEY = 'cm:service-timer:v1';
+  const defaults = [{id:uuid(),person:'Worship Leader',role:'Worship',minutes:15},{id:uuid(),person:'Announcements',role:'Announcements',minutes:5},{id:uuid(),person:'Offering',role:'Offering',minutes:10},{id:uuid(),person:'Preacher',role:'Sermon',minutes:45}];
+  const [items,setItems]=useState(()=>{try{const x=JSON.parse(localStorage.getItem(KEY));return Array.isArray(x)&&x.length?x:defaults;}catch{return defaults;}});
+  const [active,setActive]=useState(null),[remaining,setRemaining]=useState(0),[running,setRunning]=useState(false),[overtime,setOvertime]=useState(false),[projector,setProjector]=useState(false);
+  useEffect(()=>{try{localStorage.setItem(KEY,JSON.stringify(items));}catch{}},[items]);
+  useEffect(()=>{if(!running)return;const t=setInterval(()=>setRemaining(v=>{if(v<=1){setRunning(false);setOvertime(true);return 0;}return v-1;}),1000);return()=>clearInterval(t);},[running]);
+  const start=i=>{setActive(i);setRemaining(Math.max(1,Number(items[i].minutes)||1)*60);setOvertime(false);setRunning(true);};
+  const reset=()=>{if(active===null)return;setRemaining(Math.max(1,Number(items[active].minutes)||1)*60);setOvertime(false);setRunning(false);};
+  const next=()=>{if(active!==null&&active<items.length-1)start(active+1);};
+  const add=()=>setItems(x=>[...x,{id:uuid(),person:'New person',role:'Programme item',minutes:5}]);
+  const update=(id,k,v)=>setItems(x=>x.map(r=>r.id===id?{...r,[k]:k==='minutes'?Math.max(1,Number(v)||1):v}:r));
+  const remove=id=>setItems(x=>x.filter(r=>r.id!==id));
+  const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  const full=async()=>{try{await document.documentElement.requestFullscreen?.();}catch{}setProjector(true);};
+  if(projector)return <div className="timer-projector" onClick={()=>setProjector(false)}><div className="timer-projector-title">{active!==null?items[active].person:'Service Timer'}</div><div className={'timer-projector-clock '+(overtime?'overtime':'')}>{overtime?'TIME UP':fmt(remaining)}</div><div className="timer-projector-role">{active!==null?`${items[active].role} · ${items[active].minutes} minutes`:'Select a programme item to begin'}</div><div className="timer-projector-help">Click to return to controls</div></div>;
+  return <><div className="top"><div><h1>Service Countdown Timer</h1><div className="muted">Set a duration for each person or programme item. Projector Mode shows the countdown in large text.</div></div><button className="primary" onClick={full}>Projector Mode</button></div><div className="panel"><div className="toolbar"><button onClick={add}>+ Add programme item</button><button onClick={()=>setItems(defaults.map(x=>({...x,id:uuid()})))}>Restore sample</button></div></div><div className="panel"><div className="tablewrap"><table><thead><tr><th>#</th><th>Person / item</th><th>Role</th><th>Minutes</th><th></th></tr></thead><tbody>{items.map((r,i)=><tr key={r.id}><td>{i+1}</td><td><input value={r.person} onChange={e=>update(r.id,'person',e.target.value)}/></td><td><input value={r.role} onChange={e=>update(r.id,'role',e.target.value)}/></td><td><input type="number" min="1" value={r.minutes} onChange={e=>update(r.id,'minutes',e.target.value)} style={{width:90}}/></td><td className="actions"><button className="primary" onClick={()=>start(i)}>Start</button><button className="danger" onClick={()=>remove(r.id)}>Remove</button></td></tr>)}</tbody></table></div></div><div className="panel timer-control"><div className="timer-current"><div className="label">Current item</div><h2>{active!==null?items[active].person:'No item selected'}</h2><div className={'timer-clock '+(overtime?'overtime':'')}>{overtime?'TIME UP':fmt(remaining)}</div><div className="toolbar"><button onClick={()=>setRunning(x=>!x)} disabled={active===null}>{running?'Pause':'Resume'}</button><button onClick={reset} disabled={active===null}>Reset</button><button className="primary" onClick={next} disabled={active===null||active>=items.length-1}>Next</button><button onClick={full}>Projector Mode</button></div></div></div></>;
 }
 
 /* ---------------- SMS ---------------- */
