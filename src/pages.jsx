@@ -418,6 +418,73 @@ export function Events() {
   </>;
 }
 
+
+/* ---------------- Event Attendance ---------------- */
+export function EventAttendance() {
+  const { data, save } = useData();
+  const { role } = useAuth();
+  const canWrite = can(role, 'attendance', 'write');
+  const events = useMemo(() => [...(data.events || [])]
+    .filter(e => String(e.date) <= today())
+    .sort((a,b) => String(b.date).localeCompare(String(a.date))), [data.events]);
+  const [eventId, setEventId] = useState('');
+  const [statusMap, setStatusMap] = useState({});
+
+  const event = events.find(e => e.id === eventId);
+  const registrations = useMemo(() => (data.event_registrations || []).filter(r => r.event_id === eventId), [data.event_registrations, eventId]);
+  const registeredIds = useMemo(() => new Set(registrations.map(r => r.member_id)), [registrations]);
+  const members = useMemo(() => {
+    const base = [...(data.members || [])].filter(m => m.status !== 'Inactive');
+    return registrations.length ? base.filter(m => registeredIds.has(m.id)) : base;
+  }, [data.members, registrations.length, registeredIds]);
+
+  useEffect(() => {
+    if (!eventId) { setStatusMap({}); return; }
+    const rows = (data.attendance || []).filter(a => a.event_id === eventId);
+    const next = {};
+    rows.forEach(a => { if (a.member_id) next[a.member_id] = a.status; });
+    setStatusMap(next);
+  }, [eventId, data.attendance]);
+
+  const toggle = (id) => setStatusMap(m => ({...m, [id]: m[id] === 'Present' ? 'Absent' : 'Present'}));
+  const markAll = (status) => { const next = {}; members.forEach(m => { next[m.id] = status; }); setStatusMap(next); };
+
+  const saveAll = () => {
+    if (!event) return;
+    let count = 0;
+    members.forEach(m => {
+      const status = statusMap[m.id];
+      if (!status) return;
+      const existing = (data.attendance || []).find(a => a.event_id === event.id && a.member_id === m.id);
+      save('attendance', {
+        id: existing?.id || uuid(), event_id: event.id, date: event.date,
+        service: `Event: ${event.title}`, person_name: m.name, member_id: m.id,
+        status, note: existing?.note || `Event occurrence attendance: ${event.title}`
+      });
+      count++;
+    });
+    alert(`Saved ${count} attendance record${count === 1 ? '' : 's'} for ${event.title}.`);
+  };
+
+  const present = members.filter(m => statusMap[m.id] === 'Present').length;
+  const absent = members.filter(m => statusMap[m.id] === 'Absent').length;
+
+  return <>
+    <div className="top"><div><h1>Event Attendance</h1><div className="muted">Record attendance separately for each event occurrence. Weekly events have separate attendance records.</div></div></div>
+    <div className="panel">
+      <div className="toolbar">
+        <select value={eventId} onChange={e => setEventId(e.target.value)} style={{minWidth:320}}><option value="">Select event occurrence</option>{events.map(e => <option key={e.id} value={e.id}>{e.date} · {e.title}{e.event_time ? ` · ${e.event_time}` : ''}</option>)}</select>
+        {event && canWrite && <><button onClick={() => markAll('Present')}>Mark all present</button><button onClick={() => markAll('Absent')}>Mark all absent</button><button className="primary" onClick={saveAll}>Save attendance</button></>}
+      </div>
+    </div>
+    {event && <div className="cards"><div className="card"><span className="label">Event</span><strong>{event.title}</strong></div><div className="card"><span className="label">Date</span><strong>{event.date}</strong></div><div className="card"><span className="label">Present</span><strong>{present}</strong></div><div className="card"><span className="label">Absent</span><strong>{absent}</strong></div></div>}
+    {event && <div className="panel"><h2>{event.title} attendance</h2><div className="muted" style={{marginBottom:12}}>{event.date} {event.event_time || ''} {event.location ? `· ${event.location}` : ''}{registrations.length ? ` · ${registrations.length} registered` : ''}</div><div className="tablewrap"><table><thead><tr><th>Member</th><th>Phone</th><th>Status</th><th></th></tr></thead><tbody>
+      {members.map(m => <tr key={m.id}><td><b>{m.name}</b><br/><small>{m.member_code || ''}</small></td><td>{m.phone || ''}</td><td>{statusMap[m.id] ? badge(statusMap[m.id]) : <span className="muted">Not marked</span>}</td><td>{canWrite && <button onClick={() => toggle(m.id)}>{statusMap[m.id] === 'Present' ? 'Mark absent' : 'Mark present'}</button>}</td></tr>)}
+      {!members.length && <tr><td colSpan="4" className="empty">No members found for this occurrence.</td></tr>}
+    </tbody></table></div></div>}
+  </>;
+}
+
 /* ---------------- SMS ---------------- */
 export function SendSMS() {
   const { data } = useData();

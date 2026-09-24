@@ -3,7 +3,7 @@ import { configured } from './supabase';
 import { AuthProvider, useAuth, can } from './auth';
 import { DataProvider, useData } from './data';
 import {
-  Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings,
+  Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings, EventAttendance,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
   WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn,
 } from './pages';
@@ -187,6 +187,7 @@ const NAV = [
   ['volunteerschedule', '🗓 Volunteer Schedule', VolunteerSchedule, 'volunteers'],
   ['eventregistration', '🎟 Event Registration', EventRegistration, 'events'],
   ['events', '📅 Events', Events, 'events'],
+  ['eventattendance', '📋 Event Attendance', EventAttendance, 'attendance'],
   ['sms', '💬 Send SMS', SendSMS, 'members'],
   ['reports', '📈 Reports', Reports, null],
   ['users', '🔑 Users', Users, 'ADMIN'],
