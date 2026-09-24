@@ -110,3 +110,7 @@ The member code is stable and suitable for printing on a membership card. A came
 
 ### V8 recurring events
 Run `supabase/migration_08_recurring_events.sql`. In Events, choose `Every week` and select the date through which the weekly series should run. The system creates one event occurrence for each week, so registrations and future event attendance work against real event records.
+
+
+## V12
+Run `supabase/migration_12_member_engagement.sql` after the earlier migrations. V12 adds digital giving records, printable receipts, communication templates and an engagement message queue. Actual SMS, WhatsApp and email delivery requires a connected provider.
