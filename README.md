@@ -131,3 +131,107 @@ The application remains provider-neutral for SMS, WhatsApp, email and payment ga
 
 ## V14
 Added Advanced Reports and a multi-branch foundation. Run `supabase/migration_14_advanced_reports_branches.sql` after migration 13. Branch records are administered by admins. Existing records keep a NULL branch until assigned.
+
+
+## V15 Notification Center
+Run `supabase/migration_15_notifications.sql` after the V14 migration. V15 adds church-wide notification campaigns, audience targeting, campaign history, and delivery-log foundations. External SMS, WhatsApp and email providers still need their own credentials and sending service before queued messages are delivered.
+
+
+## V16: Ghana Mobile Money Payments
+
+Run `supabase/migration_16_payments.sql` after V15.
+
+V16 adds payment requests, webhook event storage, finance monitoring, and Paystack-ready Supabase Edge Functions for Ghana Mobile Money. Paystack's current documentation says its Ghana Mobile Money channel supports MTN, Telecel and AirtelTigo/ATMoney, and that final status should be handled through webhooks.
+
+Configure the Edge Function secret `PAYSTACK_SECRET_KEY`. Deploy `supabase/functions/paystack-charge` and `supabase/functions/paystack-webhook`. Never put the Paystack secret key in Vite environment variables or browser code.
+
+### V16 deployment steps
+
+1. Run `supabase/migration_16_payments.sql` in Supabase SQL Editor.
+2. Deploy the two Edge Functions:
+   - `supabase functions deploy paystack-charge`
+   - `supabase functions deploy paystack-webhook`
+3. Set the server-side secret:
+   - `supabase secrets set PAYSTACK_SECRET_KEY=YOUR_PAYSTACK_SECRET_KEY`
+4. In Paystack Dashboard, set the webhook URL to:
+   `https://YOUR-PROJECT-REF.supabase.co/functions/v1/paystack-webhook`
+5. Test with a Paystack test key before switching to live mode.
+
+The V16 browser application does not contain the Paystack secret key.
+
+## V17: Automated SMS + WhatsApp Delivery
+
+V17 adds a secure notification delivery worker for the existing communication queue.
+
+### 1. Run the database migration
+
+Run:
+
+`supabase/migration_17_delivery.sql`
+
+### 2. Deploy the notification worker
+
+```bash
+supabase functions deploy notification-worker
+```
+
+### 3. Configure provider secrets
+
+SMSOnlineGH:
+
+```bash
+supabase secrets set SMSONLINEGH_API_KEY=YOUR_API_KEY SMSONLINEGH_SENDER_ID=YOUR_APPROVED_SENDER_ID
+```
+
+WhatsApp Cloud API:
+
+```bash
+supabase secrets set WHATSAPP_ACCESS_TOKEN=YOUR_META_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID=YOUR_PHONE_NUMBER_ID
+```
+
+Optional Graph API version:
+
+```bash
+supabase secrets set WHATSAPP_GRAPH_VERSION=v23.0
+```
+
+For scheduled/cron invocation, also set a strong secret:
+
+```bash
+supabase secrets set NOTIFICATION_CRON_SECRET=YOUR_LONG_RANDOM_SECRET
+```
+
+### 4. Automatic queue processing
+
+The `notification-worker` function processes due SMS and WhatsApp rows from `communication_queue`, records provider references in `notification_logs`, retries failures with increasing delays, and stops after five attempts.
+
+Supabase Cron can invoke Edge Functions periodically. Create a Cron job in the Supabase Dashboard and call:
+
+`https://YOUR-PROJECT-REF.supabase.co/functions/v1/notification-worker`
+
+Use a POST request with these headers:
+
+`Content-Type: application/json`
+
+`x-cron-secret: YOUR_LONG_RANDOM_SECRET`
+
+and body:
+
+`{"limit":25}`
+
+A one-minute schedule is suitable for near-real-time delivery. Supabase documents Cron-to-Edge-Function scheduling here: https://supabase.com/docs/guides/functions/schedule-functions
+
+### 5. WhatsApp templates
+
+For proactive WhatsApp notifications outside an active customer-service conversation, use an approved WhatsApp template. In Notification Center, enter the approved template name and language when the channel is WhatsApp. If no template is supplied, the worker attempts a normal text message, which may be rejected by Meta depending on the conversation window and WhatsApp policy.
+
+### 6. Manual processing
+
+V17 adds Delivery Center. Administrators and secretaries can use `Process queue now` to process queued messages without waiting for Cron.
+
+
+## V18 — Member Self-Service
+
+Run `supabase/migration_18_member_self_service.sql` after V17. V18 adds member-controlled profile updates, event self-registration/cancellation, digital receipt viewing and printing, prayer-request history, payment-request history, and notification preferences. Church-controlled fields such as member code, status, gender, date of birth and user linkage remain protected.
+
+After the migration, members can use **My Church** to manage their contact details, choose notification channels, register for upcoming events, review attendance/giving, print paid receipts, and track their own prayer requests.

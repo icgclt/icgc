@@ -9,12 +9,7 @@
 // Set secrets once (values from your SMSOnlineGH account):
 //   supabase secrets set SMSONLINEGH_API_KEY=xxxx SMSONLINEGH_SENDER_ID=YourChurch
 //
-// NOTE: the exact field names SMSOnlineGH expects in the JSON body below (key, sender,
-// destinations, message) are based on their published endpoint and common conventions
-// for this API, but were not confirmed against your specific account's docs. After your
-// first real send, check the "raw" field in the response this function returns — if
-// SMSOnlineGH complains about a field name, log into your SMSOnlineGH dashboard's API/
-// developer page for the exact sample request and adjust the `body` object below to match.
+// V17 uses the documented SMSOnlineGH v5 form POST API.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
@@ -65,15 +60,11 @@ Deno.serve(async (req) => {
     const numbers = [...new Set(recipients.map(normalize).filter((n) => n.length >= 12))];
     if (!numbers.length) return json({ error: 'None of the selected members have a usable phone number.' }, 400);
 
-    const resp = await fetch('https://api.smsonlinegh.com/v4/message/sms/send', {
+    const form = new URLSearchParams({ key: SMS_KEY, text: String(message).trim(), type: '0', sender: SMS_SENDER, to: numbers.join(',') });
+    const resp = await fetch('https://api.smsonlinegh.com/v5/message/sms/send', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        key: SMS_KEY,
-        sender: SMS_SENDER,
-        destinations: numbers,
-        message: String(message).trim(),
-      }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: form.toString(),
     });
     const raw = await resp.json().catch(() => ({}));
     if (!resp.ok) return json({ error: raw?.message || 'SMSOnlineGH rejected the request — see raw for details.', raw }, 502);
