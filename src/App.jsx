@@ -7,6 +7,7 @@ import {
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
   WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn,
 } from './pages';
+import { MemberCards, DepartmentDashboard, GroupDashboard, VolunteerSchedule, EventRegistration } from './operational';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
 
@@ -155,6 +156,7 @@ const NAV = [
   ['children', '🧒 Children', Children, 'children'],
   ['childcheckin', '🛡 Children Check-in', ChildCheckIn, 'child_checkins'],
   ['membercheckin', '📱 Member Check-in', MemberCheckIn, 'attendance'],
+  ['membercards', '🪪 Member ID Cards', MemberCards, 'members'],
   ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors'],
   ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
   { group: 'ministry', label: '⛪ Ministry', items: [
@@ -180,6 +182,10 @@ const NAV = [
     ['welfarefund', 'Welfare Fund', WelfareFund, 'welfare_transactions'],
   ] },
   ['departments', '🏛 Departments', Departments, 'departments'],
+  ['deptdashboard', '📋 Department Dashboard', DepartmentDashboard, 'departments'],
+  ['groupdashboard', '🏘 Group Dashboard', GroupDashboard, 'groups'],
+  ['volunteerschedule', '🗓 Volunteer Schedule', VolunteerSchedule, 'volunteers'],
+  ['eventregistration', '🎟 Event Registration', EventRegistration, 'events'],
   ['events', '📅 Events', Events, 'events'],
   ['sms', '💬 Send SMS', SendSMS, 'members'],
   ['reports', '📈 Reports', Reports, null],
