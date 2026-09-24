@@ -339,26 +339,83 @@ export function Departments() {
 }
 
 export function Events() {
-  return (
-    <Crud
-      table="events" title="Events" noun="event"
-      sortKey="date" searchKeys={['title', 'location']}
-      defaults={{ date: today() }}
-      fields={[
-        { key: 'title', label: 'Event title', required: true },
-        { key: 'date', label: 'Date', type: 'date', required: true },
-        { key: 'event_time', label: 'Time' },
-        { key: 'location', label: 'Location' },
-        { key: 'description', label: 'Description', type: 'textarea', full: true },
-      ]}
-      columns={[
-        { label: 'Date', key: 'date' },
-        { label: 'Event', render: (e) => <><b>{e.title}</b><br /><small>{e.description}</small></> },
-        { label: 'Location', key: 'location' },
-        { label: 'Time', key: 'event_time' },
-      ]}
-    />
-  );
+  const { data, save, remove } = useData();
+  const { role } = useAuth();
+  const canWrite = can(role, 'events', 'write');
+  const canDel = can(role, 'events', 'del');
+  const [q, setQ] = useState('');
+  const [form, setForm] = useState(null);
+
+  const rows = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return [...(data.events || [])]
+      .filter(e => !s || [e.title, e.location, e.description].some(v => String(v || '').toLowerCase().includes(s)))
+      .sort((a,b) => String(a.date).localeCompare(String(b.date)));
+  }, [data.events, q]);
+
+  const open = (row=null) => setForm({
+    original: row,
+    values: {
+      title: row?.title || '', date: row?.date || today(), event_time: row?.event_time || '',
+      location: row?.location || '', description: row?.description || '',
+      recurrence: row?.recurrence || 'none', recurrence_end_date: row?.recurrence_end_date || ''
+    }, errors: {}
+  });
+
+  const set = (k,v) => setForm(f => ({...f, values:{...f.values,[k]:v}}));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const v = form.values;
+    if (!v.title.trim() || !v.date) return setForm({...form, errors:{title: !v.title.trim() ? 'Required' : undefined, date: !v.date ? 'Required' : undefined}});
+    if (v.recurrence === 'weekly' && !v.recurrence_end_date) return setForm({...form, errors:{recurrence_end_date:'Select the last date for this weekly series.'}});
+    if (v.recurrence === 'weekly' && v.recurrence_end_date < v.date) return setForm({...form, errors:{recurrence_end_date:'End date must be on or after the first event date.'}});
+
+    if (form.original) {
+      save('events', {...form.original, title:v.title.trim(), date:v.date, event_time:v.event_time.trim(), location:v.location.trim(), description:v.description.trim(), recurrence:v.recurrence, recurrence_end_date:v.recurrence_end_date || null});
+    } else {
+      const seriesId = v.recurrence === 'weekly' ? uuid() : null;
+      const dates = [];
+      let d = new Date(v.date + 'T00:00:00');
+      const end = v.recurrence === 'weekly' ? new Date(v.recurrence_end_date + 'T00:00:00') : d;
+      for (let guard=0; d <= end && guard < 520; guard++) {
+        dates.push(new Date(d));
+        if (v.recurrence !== 'weekly') break;
+        d.setDate(d.getDate()+7);
+      }
+      dates.forEach(dt => {
+        const iso = dt.toISOString().slice(0,10);
+        save('events', {
+          id: uuid(), title:v.title.trim(), date:iso, event_time:v.event_time.trim(), location:v.location.trim(), description:v.description.trim(),
+          recurrence:v.recurrence, recurrence_end_date:v.recurrence === 'weekly' ? v.recurrence_end_date : null,
+          series_id:seriesId
+        });
+      });
+    }
+    setForm(null);
+  };
+
+  return <>
+    <div className="top"><div><h1>Events</h1><div className="muted">Create one-time events or recurring weekly events.</div></div>{canWrite && <button className="primary" onClick={()=>open()}>+ Add event</button>}</div>
+    <div className="panel"><div className="toolbar"><input placeholder="Search events" value={q} onChange={e=>setQ(e.target.value)} /></div></div>
+    <div className="panel"><div className="tablewrap"><table><thead><tr><th>Date</th><th>Event</th><th>Time</th><th>Location</th><th>Repeat</th><th></th></tr></thead><tbody>
+      {rows.map(e=><tr key={e.id}><td>{e.date}</td><td><b>{e.title}</b><br/><small>{e.description}</small></td><td>{e.event_time||''}</td><td>{e.location||''}</td><td>{e.recurrence==='weekly' ? `Weekly until ${e.recurrence_end_date}` : 'One-time'}</td><td>{canWrite&&<button onClick={()=>open(e)}>Edit</button>} {canDel&&<button className="danger" onClick={()=>remove('events',e.id)}>Delete</button>}</td></tr>)}
+      {!rows.length&&<tr><td colSpan="6" className="empty">No events.</td></tr>}
+    </tbody></table></div></div>
+    {form && <div className="modal"><form className="modalcard" onSubmit={submit}><h2>{form.original?'Edit event':'Add event'}</h2>
+      <div className="formgrid">
+        <div><label>Event title *</label><input value={form.values.title} onChange={e=>set('title',e.target.value)} /></div>
+        <div><label>First date *</label><input type="date" value={form.values.date} onChange={e=>set('date',e.target.value)} /></div>
+        <div><label>Time</label><input value={form.values.event_time} onChange={e=>set('event_time',e.target.value)} placeholder="6:00 PM" /></div>
+        <div><label>Location</label><input value={form.values.location} onChange={e=>set('location',e.target.value)} /></div>
+        <div><label>Repeat</label><select value={form.values.recurrence} onChange={e=>set('recurrence',e.target.value)}><option value="none">One-time</option><option value="weekly">Every week</option></select></div>
+        {form.values.recurrence==='weekly' && <div><label>Repeat until *</label><input type="date" value={form.values.recurrence_end_date} onChange={e=>set('recurrence_end_date',e.target.value)} /><small className="muted">An event is created automatically for each 7-day interval.</small></div>}
+        <div className="full"><label>Description</label><textarea value={form.values.description} onChange={e=>set('description',e.target.value)} /></div>
+      </div>
+      {Object.values(form.errors||{}).filter(Boolean).map((x,i)=><div className="err" key={i}>{x}</div>)}
+      <div className="toolbar"><button type="button" onClick={()=>setForm(null)}>Cancel</button><button className="primary">Save event</button></div>
+    </form></div>}
+  </>;
 }
 
 /* ---------------- SMS ---------------- */
