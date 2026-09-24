@@ -1543,7 +1543,7 @@ export function EngagementAutomation() {
       fields={[{key:'name',label:'Template name',required:true},{key:'channel',label:'Channel',type:'select',options:['SMS','WhatsApp','Email','In-app'],required:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','New Visitors','Birthdays'],required:true},{key:'subject',label:'Subject'},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'active',label:'Active',type:'checkbox'}]}
       columns={[{label:'Name',key:'name'},{label:'Channel',key:'channel'},{label:'Audience',key:'audience'},{label:'Active',render:t=>badge(t.active?'Active':'Off')}]}
     />
-    <Crud table="communication_queue" title="Message Queue" noun="message" sortKey="scheduled_for" sortDir="asc" searchKeys={['member_name','phone','message','trigger_type']} filters={[{key:'status',label:'All statuses',options:['Queued','Sent','Failed','Cancelled']},{key:'trigger_type',label:'All triggers',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder']}]} defaults={{channel:'SMS',status:'Queued',trigger_type:'Manual'}}
+    <Crud table="communication_queue" title="Message Queue" noun="message" sortKey="scheduled_for" sortDir="asc" searchKeys={['member_name','phone','message','trigger_type']} filters={[{key:'status',label:'All statuses',options:['Queued','Processing','Sent','Delivered','Failed','Cancelled']},{key:'trigger_type',label:'All triggers',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder']}]} defaults={{channel:'SMS',status:'Queued',trigger_type:'Manual'}}
       fields={[{key:'member_name',label:'Recipient name',required:true},{key:'phone',label:'Phone'},{key:'channel',label:'Channel',type:'select',options:['SMS','WhatsApp','Email','In-app'],required:true},{key:'trigger_type',label:'Trigger',type:'select',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder'],required:true},{key:'scheduled_for',label:'Scheduled for',type:'datetime-local'},{key:'status',label:'Status',type:'select',options:['Queued','Sent','Failed','Cancelled'],required:true},{key:'message',label:'Message',type:'textarea',required:true,full:true}]}
       columns={[{label:'Recipient',key:'member_name'},{label:'Channel',key:'channel'},{label:'Trigger',key:'trigger_type'},{label:'Scheduled',key:'scheduled_for'},{label:'Status',render:q=>badge(q.status)}]}
     />
@@ -1684,4 +1684,124 @@ export function Branches() {
   return <Crud table="branches" title="Church Branches" noun="branch" sortKey="name" searchKeys={['name','code','city']} defaults={{status:'Active'}} fields={[
     {key:'name',label:'Branch name',required:true},{key:'code',label:'Branch code',required:true},{key:'city',label:'City / town'},{key:'phone',label:'Phone',type:'tel'},{key:'address',label:'Address',full:true},{key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true}
   ]} columns={[{label:'Name',render:r=><><b>{r.name}</b><br/><small>{r.code}</small></>},{label:'City',key:'city'},{label:'Phone',key:'phone'},{label:'Status',render:r=>badge(r.status)}]} />;
+}
+
+
+
+
+/* ---------------- V16 Mobile Money Payments ---------------- */
+export function MobileMoneyPayments() {
+  const { data, save } = useData();
+  const { role } = useAuth();
+  const allowed = ['admin','finance'];
+  const [memberId,setMemberId]=useState(''); const [amount,setAmount]=useState(''); const [fund,setFund]=useState('Offering');
+  const [phone,setPhone]=useState(''); const [provider,setProvider]=useState('mtn'); const [status,setStatus]=useState('');
+  if (!allowed.includes(role)) return <div className="panel"><h2>Mobile Money Payments</h2><p className="muted">Only administrators and finance users have access.</p></div>;
+  const members=(data.members||[]).filter(m=>m.status!=='Inactive').sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  const requests=[...(data.payment_requests||[])].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,50);
+  const createRequest=async()=>{ const m=members.find(x=>x.id===memberId); const n=Number(amount);
+    if(!m || !phone.trim() || !n || n<=0){setStatus('Select a member and enter a valid amount and mobile money number.');return;}
+    setStatus('Sending payment request to the payment service...');
+    const { data: result, error } = await supabase.functions.invoke('paystack-charge',{body:{member_id:m.id,member_name:m.name,email:m.email||'',phone:phone.trim(),provider,amount:n,fund,source:'Finance Center'}});
+    if(error || result?.error){setStatus(error?.message || result?.error || 'Payment request failed.');return;}
+    setAmount('');setStatus(result?.display_message || 'Payment request sent. Ask the member to approve it on the phone.');
+  };
+  const counts=['Pending','Processing','Paid','Failed','Expired'].map(x=>[x,requests.filter(r=>r.status===x).length]);
+  return <>
+    <div className="top"><div><h1>Mobile Money Payments</h1><div className="muted">Create and monitor Ghana Mobile Money payment requests.</div></div></div>
+    <div className="cards">{counts.map(([x,n])=><div className="card" key={x}><span className="label">{x}</span><strong>{n}</strong></div>)}</div>
+    <div className="panel"><h2>Create payment request</h2><div className="formgrid">
+      <div><label>Member</label><select value={memberId} onChange={e=>{setMemberId(e.target.value);const m=members.find(x=>x.id===e.target.value);if(m?.phone)setPhone(m.phone)}}><option value="">Select member</option>{members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
+      <div><label>Amount (GHS)</label><input type="number" min="1" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} /></div>
+      <div><label>Fund</label><select value={fund} onChange={e=>setFund(e.target.value)}><option>Tithe</option><option>Offering</option><option>Donation</option><option>Pledge</option><option>Project</option><option>Thanksgiving</option></select></div>
+      <div><label>Mobile money provider</label><select value={provider} onChange={e=>setProvider(e.target.value)}><option value="mtn">MTN MoMo</option><option value="vod">Telecel Cash</option><option value="atl">AirtelTigo / ATMoney</option></select></div>
+      <div><label>Mobile number</label><input type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="0551234567" /></div>
+    </div><div className="toolbar"><button className="primary" onClick={createRequest}>Create payment request</button>{status&&<span className="muted">{status}</span>}</div></div>
+    <div className="panel"><h2>Recent payment requests</h2><div className="tablewrap"><table><thead><tr><th>Created</th><th>Member</th><th>Amount</th><th>Fund</th><th>Provider</th><th>Reference</th><th>Status</th></tr></thead><tbody>{requests.map(r=><tr key={r.id}><td>{String(r.created_at||'').slice(0,16).replace('T',' ')}</td><td>{r.member_name}</td><td>{money(r.amount)}</td><td>{r.fund}</td><td>{r.provider}</td><td>{r.reference||r.provider_reference||''}</td><td>{badge(r.status)}</td></tr>)}{!requests.length&&<tr><td colSpan="7" className="empty">No payment requests yet.</td></tr>}</tbody></table></div></div>
+    <div className="panel"><h2>Provider setup</h2><p className="muted">The browser must never contain the Paystack secret key. The supplied Supabase Edge Functions keep that key server-side. Configure <code>PAYSTACK_SECRET_KEY</code>, deploy <code>paystack-charge</code> and <code>paystack-webhook</code>, then set the Paystack webhook URL to the webhook function.</p></div>
+  </>;
+}
+
+
+/* ---------------- V17 Delivery Center ---------------- */
+export function DeliveryCenter() {
+  const { data, syncNow } = useData();
+  const { role } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const allowed = ['admin','secretary'].includes(role);
+  const queue = [...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
+  const queued = queue.filter(q=>q.status==='Queued');
+  const failed = queue.filter(q=>q.status==='Failed');
+  const sent = queue.filter(q=>['Sent','Delivered'].includes(q.status));
+  const process = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const { data: result, error } = await supabase.functions.invoke('notification-worker', { body: { limit: 25 } });
+      if (error) throw error;
+      setMsg(result?.message || `Processed ${result?.processed||0} message(s).`);
+      await syncNow();
+    } catch (e) { setMsg(e?.message || 'Could not start the notification worker.'); }
+    finally { setBusy(false); }
+  };
+  if (!allowed) return <div className="panel"><h2>Delivery Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  return <>
+    <div className="top"><div><h1>Delivery Center</h1><div className="muted">Send queued SMS and WhatsApp messages through the secure Supabase Edge Function.</div></div><button className="primary" onClick={process} disabled={busy}>{busy?'Processing…':'Process queue now'}</button></div>
+    <div className="cards"><div className="card"><div className="label">Queued</div><div className="num">{queued.length}</div></div><div className="card"><div className="label">Sent</div><div className="num">{sent.length}</div></div><div className="card"><div className="label">Failed</div><div className="num">{failed.length}</div></div><div className="card"><div className="label">Total queue</div><div className="num">{queue.length}</div></div></div>
+    {msg&&<div className="panel"><p className="muted">{msg}</p></div>}
+    <div className="panel"><h2>Provider setup</h2><p className="muted">SMS uses SMSOnlineGH. WhatsApp uses the Meta WhatsApp Cloud API. Keep all provider credentials in Supabase Edge Function secrets, never in Vite environment variables.</p><div className="tablewrap"><table><thead><tr><th>Channel</th><th>Secrets</th><th>Notes</th></tr></thead><tbody><tr><td>SMS</td><td><code>SMSONLINEGH_API_KEY</code><br/><code>SMSONLINEGH_SENDER_ID</code></td><td>Sender ID must be approved by your SMS provider.</td></tr><tr><td>WhatsApp</td><td><code>WHATSAPP_ACCESS_TOKEN</code><br/><code>WHATSAPP_PHONE_NUMBER_ID</code></td><td>Proactive WhatsApp messages normally require an approved template.</td></tr></tbody></table></div></div>
+    <div className="panel"><h2>Recent delivery queue</h2><div className="tablewrap"><table><thead><tr><th>Scheduled</th><th>Recipient</th><th>Channel</th><th>Trigger</th><th>Status</th><th>Error</th></tr></thead><tbody>{queue.slice(0,100).map(q=><tr key={q.id}><td>{String(q.scheduled_for||'').slice(0,16).replace('T',' ')}</td><td>{q.member_name||q.phone||q.email||''}</td><td>{q.channel}</td><td>{q.trigger_type||''}</td><td>{badge(q.status)}</td><td className="muted sm">{q.last_error||q.error_message||''}</td></tr>)}{!queue.length&&<tr><td colSpan="6" className="empty">No messages in the queue.</td></tr>}</tbody></table></div></div>
+    <div className="panel"><h2>Automatic processing</h2><p className="muted">After deploying <code>notification-worker</code>, create a Supabase Cron job to call it every minute. Supabase supports invoking Edge Functions from Cron jobs, so scheduled messages can be processed without leaving a browser open.</p><pre>{`supabase functions deploy notification-worker\nsupabase secrets set SMSONLINEGH_API_KEY=... SMSONLINEGH_SENDER_ID=... WHATSAPP_ACCESS_TOKEN=... WHATSAPP_PHONE_NUMBER_ID=... NOTIFICATION_CRON_SECRET=...`}</pre></div>
+  </>;
+}
+
+/* ---------------- V15 Church-wide Notification Center ---------------- */
+export function NotificationCenter() {
+  const { data, save } = useData();
+  const { role } = useAuth();
+  const allowed = ['admin','secretary'];
+  const [channel,setChannel] = useState('In-app');
+  const [audience,setAudience] = useState('All Members');
+  const [title,setTitle] = useState('');
+  const [message,setMessage] = useState('');
+  const [schedule,setSchedule] = useState('');
+  const [waTemplate,setWaTemplate] = useState('');
+  const [waLanguage,setWaLanguage] = useState('en_US');
+  const [status,setStatus] = useState('');
+  if (!allowed.includes(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+
+  const members=(data.members||[]).filter(m=>m.status!=='Inactive');
+  const targetMembers = useMemo(() => {
+    if (audience==='All Members') return members;
+    if (audience==='Youth') return members.filter(m=>['Youth','Young Adult'].includes(m.category)||String(m.grp||'').toLowerCase().includes('youth'));
+    if (audience==='Men') return members.filter(m=>String(m.gender||'').toLowerCase()==='male');
+    if (audience==='Women') return members.filter(m=>String(m.gender||'').toLowerCase()==='female');
+    if (audience==='New Visitors') return (data.visitors||[]).filter(v=>v.phone).map(v=>({id:null,name:v.name,phone:v.phone,email:v.email}));
+    return members;
+  },[audience,members,data.visitors]);
+
+  const queueCampaign = () => {
+    if (!title.trim() || !message.trim()) { setStatus('Enter a title and message first.'); return; }
+    const campaignId=uuid();
+    const now=new Date().toISOString();
+    save('notification_campaigns',{id:campaignId,title:title.trim(),message:message.trim(),channel,audience,scheduled_for:schedule?new Date(schedule).toISOString():now,status:'Queued',recipient_count:targetMembers.length});
+    targetMembers.forEach(m=>save('communication_queue',{id:uuid(),member_id:m.id||null,member_name:m.name||m.full_name||'',phone:m.phone||'',email:m.email||'',channel,trigger_type:'Campaign',scheduled_for:schedule?new Date(schedule).toISOString():now,status:'Queued',message:message.trim(),campaign_id:campaignId,campaign_title:title.trim(),whatsapp_template_name:channel==='WhatsApp'?waTemplate.trim()||null:null,whatsapp_template_language:channel==='WhatsApp'?waLanguage.trim()||'en_US':'en_US'}));
+    setTitle(''); setMessage(''); setSchedule(''); setWaTemplate('');
+    setStatus(`${targetMembers.length} recipient message${targetMembers.length===1?'':'s'} queued.`);
+  };
+
+  const campaigns=[...(data.notification_campaigns||[])].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,30);
+  const queued=(data.communication_queue||[]).filter(q=>q.status==='Queued').length;
+  return <>
+    <div className="top"><div><h1>Notification Center</h1><div className="muted">Create church-wide or targeted messages and place them in the delivery queue.</div></div></div>
+    <div className="cards"><div className="card"><span className="label">Active members</span><strong>{members.length}</strong></div><div className="card"><span className="label">Recipients now</span><strong>{targetMembers.length}</strong></div><div className="card"><span className="label">Queued messages</span><strong>{queued}</strong></div><div className="card"><span className="label">Campaigns</span><strong>{(data.notification_campaigns||[]).length}</strong></div></div>
+    <div className="panel"><h2>Create notification</h2><div className="formgrid">
+      <div><label>Channel</label><select value={channel} onChange={e=>setChannel(e.target.value)}><option>In-app</option><option>SMS</option><option>WhatsApp</option><option>Email</option></select></div>
+      <div><label>Audience</label><select value={audience} onChange={e=>setAudience(e.target.value)}><option>All Members</option><option>Youth</option><option>Men</option><option>Women</option><option>New Visitors</option></select></div>
+      <div className="full"><label>Title</label><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Sunday Service Reminder" /></div>
+      <div className="full"><label>Message</label><textarea rows="5" value={message} onChange={e=>setMessage(e.target.value)} placeholder="Write the message to be sent..." /></div>
+      <div><label>Schedule (optional)</label><input type="datetime-local" value={schedule} onChange={e=>setSchedule(e.target.value)} /></div>{channel==='WhatsApp'&&<><div><label>WhatsApp template name (optional)</label><input value={waTemplate} onChange={e=>setWaTemplate(e.target.value)} placeholder="approved_template_name" /></div><div><label>Template language</label><input value={waLanguage} onChange={e=>setWaLanguage(e.target.value)} placeholder="en_US" /></div></>}
+    </div><div className="toolbar"><button className="primary" onClick={queueCampaign}>Queue notification</button><span className="muted">Recipients: {targetMembers.length}</span></div>{status&&<p className="muted">{status}</p>}<p className="muted sm">Messages are queued first. SMS, WhatsApp and email delivery require a connected provider before they are actually sent.</p></div>
+    <div className="panel"><h2>Recent campaigns</h2><div className="tablewrap"><table><thead><tr><th>Created</th><th>Title</th><th>Channel</th><th>Audience</th><th>Recipients</th><th>Status</th></tr></thead><tbody>{campaigns.map(c=><tr key={c.id}><td>{String(c.created_at||'').slice(0,16).replace('T',' ')}</td><td><b>{c.title}</b></td><td>{c.channel}</td><td>{c.audience}</td><td>{c.recipient_count||0}</td><td>{badge(c.status)}</td></tr>)}{!campaigns.length&&<tr><td colSpan="6" className="empty">No campaigns created yet.</td></tr>}</tbody></table></div></div>
+  </>;
 }

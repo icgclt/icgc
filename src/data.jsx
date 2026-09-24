@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 export const TABLES = [
   'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
   'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
-  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'volunteers', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'volunteer_schedules', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'branches',
+  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'volunteers', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'volunteer_schedules', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'branches', 'notification_campaigns', 'notification_logs', 'payment_requests', 'payment_webhook_events', 'member_notification_preferences',
 ];
 
 // Financial records use sessionStorage rather than localStorage. This keeps sensitive giving/welfare
@@ -79,7 +79,7 @@ async function send(op) {
 }
 
 export function DataProvider({ uid, role, children }) {
-  const ACTIVE_TABLES = role === 'member' ? ['members','attendance','giving','events','prayer_requests','event_registrations','announcements'] : TABLES;
+  const ACTIVE_TABLES = role === 'member' ? ['members','attendance','giving','events','prayer_requests','event_registrations','announcements','payment_requests','payment_receipts','member_notification_preferences'] : TABLES;
   const ck = (t) => `cm:${uid}:cache:${t}`;
   const okey = `cm:${uid}:outbox`;
   const skey = `cm:${uid}:sensitive-outbox`;

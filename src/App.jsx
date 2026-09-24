@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings, EventAttendance, ServiceTimer,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn, FinanceCenter, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, Branches,
+  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, Volunteers, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn, FinanceCenter, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, Branches, NotificationCenter, MobileMoneyPayments, DeliveryCenter,
 } from './pages';
 import { MemberCards, DepartmentDashboard, GroupDashboard, VolunteerSchedule, EventRegistration } from './operational';
 
@@ -194,7 +194,10 @@ const NAV = [
   ['financecenter', '💳 Finance Center', FinanceCenter, 'pledges'],
   ['financereconciliation', '🧾 Finance Reconciliation', FinanceReconciliation, 'finance_reconciliations'],
   ['communications', '📢 Communication Center', CommunicationCenter, 'announcements'],
+  ['notifications', '📣 Notification Center', NotificationCenter, 'communication_queue'],
+  ['deliverycenter', '🚚 Delivery Center', DeliveryCenter, 'communication_queue'],
   ['membergiving', '💳 Member Giving & Receipts', MemberGiving, 'payment_receipts'],
+  ['mobilemoney', '📱 Mobile Money Payments', MobileMoneyPayments, 'payment_requests'],
   ['engagement', '🤖 Engagement Automation', EngagementAutomation, 'announcements'],
   ['automationcenter', '⚙️ Automation Center', AutomationCenter, 'communication_queue'],
   ['reports', '📈 Reports', Reports, null],
