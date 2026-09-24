@@ -1,0 +1,4 @@
+-- V10: Service timer does not require a database table.
+-- Timer programmes are stored locally on the service operator's device.
+-- Event-series attendance reporting uses the existing events and attendance tables.
+-- No SQL changes are required for this feature.
