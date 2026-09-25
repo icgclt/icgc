@@ -69,3 +69,13 @@ This edition is tailored for a single church with three check-in groups: Adults,
 - Monthly Contributions use the main church member database.
 - Welfare dues use the main church member database instead of a separate Welfare Members register.
 - Service Countdown has separate Timer Setup and Live Countdown screens. Live Countdown is designed as a projection-friendly full-screen view.
+
+## V24: Member records and payment corrections
+- First Fruit and Welfare Dues now support direct member/month/amount payment entry.
+- First Fruit is recorded against the selected payment month.
+- The separate Monthly Contributions menu has been removed.
+- Welfare Dues uses the main church Members database.
+- Recent headcount history shows each gender/category count.
+- Members receive a stable unique Member ID when created or imported.
+- Member Record provides a searchable Member ID view of linked attendance, First Fruit, Welfare Dues, receipts, payment requests, prayer requests, follow-ups and children.
+- Run `supabase/migration_24_member_records_contributions.sql`.
