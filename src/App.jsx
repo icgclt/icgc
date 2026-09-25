@@ -4,8 +4,8 @@ import { AuthProvider, useAuth, can } from './auth';
 import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
-  FirstFruit, MonthlyContribution, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, Children, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter,
+  FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
+  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, Children, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup,
 } from './pages';
 import { DepartmentDashboard } from './operational';
 
@@ -152,6 +152,7 @@ const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
   ['memberportal', '🙋 My Church', MemberPortal, null],
   ['members', '👥 Members', Members, 'members'],
+  ['memberrecord', '🔎 Member Record', MemberLookup, 'members'],
   ['children', '🧒 Children', Children, 'children'],
   { group: 'checkin', label: '🟢 Check-in', items: [
     ['adultcheckin', 'Adults', AdultCheckIn, 'attendance'],
@@ -180,8 +181,7 @@ const NAV = [
   { group: 'finance', label: '💰 Finance', items: [
     ['offerings', 'Offerings', Offerings, 'offering_entries'],
     ['firstfruit', 'First Fruit', FirstFruit, 'member_contributions'],
-    ['monthlycontribution', 'Monthly Contributions', MonthlyContribution, 'member_contributions'],
-    ['membergiving', 'Digital Receipts', MemberGiving, 'payment_receipts'],
+        ['membergiving', 'Digital Receipts', MemberGiving, 'payment_receipts'],
     ['mobilemoney', 'Mobile Money Payments', MobileMoneyPayments, 'payment_requests'],
     ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'finance_reconciliations'],
   ] },

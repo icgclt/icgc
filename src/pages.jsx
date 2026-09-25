@@ -89,8 +89,10 @@ function MemberImport() {
         if (!name) { skipped++; continue; }
         const match = byName.get(name.toLowerCase());
         const status = r.status || match?.status || 'Active';
+        const importId = match ? match.id : uuid();
         save('members', {
-          id: match ? match.id : uuid(),
+          id: importId,
+          member_code: match?.member_code || ('M-' + importId.replaceAll('-', '').slice(0, 8).toUpperCase()),
           name,
           phone: r.phone || match?.phone || '',
           email: r.email || match?.email || '',
@@ -137,7 +139,7 @@ export function Members() {
       <MemberImport />
       <Crud
       table="members" title="Members" noun="member"
-      sortKey="name" searchKeys={['name', 'phone', 'grp', 'email']}
+      sortKey="name" searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
       filters={[{ key: 'status', label: 'All statuses', options: STATUS }]}
       defaults={{ status: 'Active' }}
       fields={[
@@ -152,6 +154,7 @@ export function Members() {
         { key: 'notes', label: 'Notes', type: 'textarea', full: true },
       ]}
       columns={[
+        { label: 'Member ID', render: (m) => <b>{m.member_code || 'Not assigned'}</b> },
         { label: 'Name', render: (m) => <><b>{m.name}</b><br /><small>{m.email}</small></> },
         { label: 'Phone', key: 'phone' },
         { label: 'Group', key: 'grp' },
@@ -160,6 +163,53 @@ export function Members() {
       />
     </>
   );
+}
+
+export function MemberLookup() {
+  const { data } = useData();
+  const [q, setQ] = useState('');
+  const [selectedId, setSelectedId] = useState('');
+  const members = data.members || [];
+  const matches = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return members.slice(0, 30);
+    return members.filter(m => `${m.member_code || ''} ${m.name || ''} ${m.phone || ''}`.toLowerCase().includes(term)).slice(0, 30);
+  }, [members, q]);
+  const member = members.find(m => m.id === selectedId) || (matches.length === 1 ? matches[0] : null);
+  useEffect(() => { if (!selectedId && matches.length === 1) setSelectedId(matches[0].id); }, [matches, selectedId]);
+  const rowsFor = (table, field='member_id') => (data[table] || []).filter(r => member && (r[field] === member.id || (!r[field] && r.person_name === member.name) || (!r[field] && r.member_name === member.name)));
+  const attendance = member ? rowsFor('attendance').sort((a,b)=>String(b.date).localeCompare(String(a.date))) : [];
+  const firstFruit = member ? (data.member_contributions || []).filter(r => r.fund === 'First Fruit' && (r.member_id === member.id || (!r.member_id && r.person_name === member.name))).sort((a,b)=>`${b.year}-${b.month}`.localeCompare(`${a.year}-${a.month}`)) : [];
+  const welfare = member ? (data.member_contributions || []).filter(r => r.fund === 'Welfare Dues' && (r.member_id === member.id || (!r.member_id && r.person_name === member.name))).sort((a,b)=>`${b.year}-${b.month}`.localeCompare(`${a.year}-${a.month}`)) : [];
+  const receipts = member ? (data.payment_receipts || []).filter(r => r.member_id === member.id || (!r.member_id && r.member_name === member.name)).sort((a,b)=>String(b.paid_at||b.created_at).localeCompare(String(a.paid_at||a.created_at))) : [];
+  const requests = member ? (data.payment_requests || []).filter(r => r.member_id === member.id).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))) : [];
+  const prayers = member ? (data.prayer_requests || []).filter(r => r.member_id === member.id || (!r.member_id && r.person_name === member.name)).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))) : [];
+  const followups = member ? (data.follow_ups || []).filter(r => r.member_id === member.id || (!r.member_id && (r.person_name === member.name || r.member_name === member.name))).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))) : [];
+  const children = member ? (data.children || []).filter(r => r.member_id === member.id) : [];
+  const totalFirstFruit = firstFruit.reduce((s,r)=>s+Number(r.amount||0),0);
+  const totalWelfare = welfare.reduce((s,r)=>s+Number(r.amount||0),0);
+  const totalReceipts = receipts.filter(r=>r.status==='Paid').reduce((s,r)=>s+Number(r.amount||0),0);
+  return <>
+    <div className="top"><div><h1>Member Record</h1><div className="muted">Search a member by the unique Member ID, name or phone and view the member's connected records.</div></div></div>
+    <div className="panel">
+      <div className="toolbar"><input autoFocus placeholder="Enter Member ID e.g. M-ABC12345, name or phone…" value={q} onChange={e=>{setQ(e.target.value);setSelectedId('')}} />{q && matches.length > 1 && <select value={selectedId} onChange={e=>setSelectedId(e.target.value)}><option value="">Select member</option>{matches.map(m=><option key={m.id} value={m.id}>{m.member_code || 'No ID'} · {m.name}</option>)}</select>}</div>
+      {!member && <div className="empty">Search for a member to open the complete member record.</div>}
+    </div>
+    {member && <>
+      <div className="panel"><div className="top" style={{marginBottom:8}}><div><h2 style={{margin:0}}>{member.name}</h2><div className="muted">Member ID: <b>{member.member_code || 'Not assigned'}</b> · {member.phone || 'No phone'} · {member.status || ''}</div></div></div><div className="cards"><div className="card"><span className="label">Attendance</span><strong>{attendance.filter(a=>a.status==='Present').length}</strong></div><div className="card"><span className="label">First Fruit</span><strong>{money(totalFirstFruit)}</strong></div><div className="card"><span className="label">Welfare Dues</span><strong>{money(totalWelfare)}</strong></div><div className="card"><span className="label">Paid Receipts</span><strong>{money(totalReceipts)}</strong></div><div className="card"><span className="label">Prayer Requests</span><strong>{prayers.length}</strong></div><div className="card"><span className="label">Follow-ups</span><strong>{followups.length}</strong></div></div></div>
+      <div className="grid2">
+        <div className="panel"><h2>Personal information</h2><p><b>Member ID:</b> {member.member_code || ''}</p><p><b>Gender:</b> {member.gender || 'Not recorded'}</p><p><b>Date of birth:</b> {member.dob || 'Not recorded'}</p><p><b>Group:</b> {member.grp || 'Not assigned'}</p><p><b>Phone:</b> {member.phone || ''}</p><p><b>Email:</b> {member.email || ''}</p><p><b>Address:</b> {member.address || ''}</p><p><b>Occupation:</b> {member.occupation || ''}</p></div>
+        <div className="panel"><h2>Children / dependants</h2>{children.length ? children.map(c=><div className="listrow" key={c.id}><b>{c.name}</b><span className="muted">{c.gender || ''} · {c.dob || ''}</span></div>) : <div className="empty">No linked children.</div>}</div>
+      </div>
+      <div className="panel"><h2>Attendance history</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Service</th><th>Status</th><th>Note</th></tr></thead><tbody>{attendance.slice(0,50).map(r=><tr key={r.id}><td>{r.date}</td><td>{r.service}</td><td>{badge(r.status)}</td><td>{r.note || ''}</td></tr>)}{!attendance.length&&<tr><td colSpan="4" className="empty">No attendance records linked to this member.</td></tr>}</tbody></table></div></div>
+      <div className="grid2">
+        <div className="panel"><h2>First Fruit</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Amount</th></tr></thead><tbody>{firstFruit.slice(0,30).map(r=><tr key={r.id}><td>{MONTHS[Number(r.month)-1]} {r.year}</td><td>{money(r.amount)}</td></tr>)}{!firstFruit.length&&<tr><td colSpan="2" className="empty">No First Fruit records.</td></tr>}</tbody></table></div></div>
+        <div className="panel"><h2>Welfare Dues</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Amount</th></tr></thead><tbody>{welfare.slice(0,30).map(r=><tr key={r.id}><td>{MONTHS[Number(r.month)-1]} {r.year}</td><td>{money(r.amount)}</td></tr>)}{!welfare.length&&<tr><td colSpan="2" className="empty">No Welfare Dues records.</td></tr>}</tbody></table></div></div>
+      </div>
+      <div className="panel"><h2>Payments and receipts</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Fund</th><th>Amount</th><th>Method</th><th>Status</th><th>Reference</th></tr></thead><tbody>{receipts.slice(0,50).map(r=><tr key={r.id}><td>{String(r.paid_at||r.created_at||'').slice(0,10)}</td><td>{r.fund}</td><td>{money(r.amount)}</td><td>{r.method || ''}</td><td>{badge(r.status)}</td><td>{r.reference || r.receipt_number || ''}</td></tr>)}{!receipts.length&&<tr><td colSpan="6" className="empty">No digital receipts linked to this member.</td></tr>}</tbody></table></div>{requests.length>0&&<p className="muted sm">There are also {requests.length} Mobile Money payment request(s) for this member.</p>}</div>
+      <div className="grid2"><div className="panel"><h2>Prayer requests</h2>{prayers.slice(0,20).map(r=><div className="listrow" key={r.id}><span>{r.request}</span>{badge(r.status)}</div>)}{!prayers.length&&<div className="empty">No prayer requests.</div>}</div><div className="panel"><h2>Follow-up</h2>{followups.slice(0,20).map(r=><div className="listrow" key={r.id}><span>{r.reason || r.type || r.notes || 'Follow-up'}</span>{badge(r.status)}</div>)}{!followups.length&&<div className="empty">No follow-up records.</div>}</div></div>
+    </>}
+  </>;
 }
 
 export function Attendance() {
@@ -665,74 +715,95 @@ function ContributionsGrid({ fund, roster, title }) {
   const { data, save } = useData();
   const [year, setYear] = useState(new Date().getFullYear());
   const [q, setQ] = useState('');
-  const [edits, setEdits] = useState({}); // `${name}|${month}` -> string value
+  const [edits, setEdits] = useState({});
+  const [memberId, setMemberId] = useState(roster[0]?.id || '');
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [amount, setAmount] = useState('');
 
   const existing = useMemo(() => {
     const map = new Map();
-    data.member_contributions.forEach((c) => { if (c.fund === fund && c.year === year) map.set(c.person_name + '|' + c.month, c); });
+    data.member_contributions.forEach((c) => {
+      if (c.fund === fund && Number(c.year) === Number(year)) map.set(c.person_name + '|' + c.month, c);
+    });
     return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.member_contributions, fund, year]);
 
   useEffect(() => { setEdits({}); }, [year, fund]);
+  useEffect(() => { if (!roster.some(m => m.id === memberId)) setMemberId(roster[0]?.id || ''); }, [roster, memberId]);
 
-  const shown = roster.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()));
-
-  const valueFor = (name, month) => {
-    const k = name + '|' + month;
+  const shown = roster.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()) || String(m.member_code || '').toLowerCase().includes(q.trim().toLowerCase()));
+  const valueFor = (name, mth) => {
+    const k = name + '|' + mth;
     if (k in edits) return edits[k];
     const rec = existing.get(k);
     return rec ? String(rec.amount) : '';
   };
-  const setValue = (name, month, v) => setEdits((e) => ({ ...e, [name + '|' + month]: v }));
+  const setValue = (name, mth, v) => setEdits((e) => ({ ...e, [name + '|' + mth]: v }));
   const rowTotal = (name) => MONTHS.reduce((s, _, i) => s + (Number(valueFor(name, i + 1)) || 0), 0);
-  const monthTotal = (month) => shown.reduce((s, m) => s + (Number(valueFor(m.name, month)) || 0), 0);
+  const monthTotal = (mth) => shown.reduce((s, m) => s + (Number(valueFor(m.name, mth)) || 0), 0);
   const grandTotal = shown.reduce((s, m) => s + rowTotal(m.name), 0);
+
+  const saveEntry = () => {
+    const member = roster.find(m => m.id === memberId);
+    const n = Number(amount);
+    if (!member) return alert('Select a member.');
+    if (!n || n <= 0) return alert('Enter a valid amount.');
+    const key = member.name + '|' + month;
+    const rec = existing.get(key);
+    save('member_contributions', {
+      id: rec?.id || uuid(), fund, member_id: member.id, person_name: member.name,
+      year: Number(year), month: Number(month), amount: n,
+    });
+    setAmount('');
+    alert(`${fund} payment recorded for ${member.name} for ${MONTHS[month - 1]} ${year}.`);
+  };
 
   const saveAll = () => {
     let n = 0;
     Object.entries(edits).forEach(([k, v]) => {
       const [name, monthStr] = k.split('|');
-      const month = Number(monthStr);
-      const amount = Number(v) || 0;
+      const mth = Number(monthStr);
+      const amountNum = Number(v) || 0;
       const rec = existing.get(k);
-      if (!rec && amount === 0) return;
-      save('member_contributions', { id: rec ? rec.id : uuid(), fund, person_name: name, year, month, amount });
+      const member = roster.find(m => m.name === name);
+      if (!rec && amountNum === 0) return;
+      save('member_contributions', {
+        id: rec ? rec.id : uuid(), fund, member_id: member?.id || rec?.member_id || null,
+        person_name: name, year: Number(year), month: mth, amount: amountNum,
+      });
       n++;
     });
     setEdits({});
-    alert(n ? `Saved ${n} entr${n === 1 ? 'y' : 'ies'}.` : 'No changes to save.');
+    alert(n ? `Saved ${n} ${fund.toLowerCase()} entr${n === 1 ? 'y' : 'ies'}.` : 'No changes to save.');
   };
 
   return (
     <>
       <div className="top">
         <h1>{title}</h1>
-        <button className="primary" onClick={saveAll}>Save changes</button>
+        <button className="primary" onClick={saveAll}>Save grid changes</button>
+      </div>
+      <div className="panel">
+        <h2>Add payment</h2>
+        <div className="formgrid">
+          <div><label>Member</label><select value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">Select member</option>{roster.map(m => <option key={m.id} value={m.id}>{m.name}{m.member_code ? ` · ${m.member_code}` : ''}</option>)}</select></div>
+          <div><label>Year</label><input type="number" value={year} onChange={e => setYear(Number(e.target.value) || year)} /></div>
+          <div><label>Month paid</label><select value={month} onChange={e => setMonth(Number(e.target.value))}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
+          <div><label>Amount (GHS)</label><input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+        </div>
+        <button className="primary" style={{ marginTop: 12 }} onClick={saveEntry}>Record {fund} payment</button>
+        <p className="muted sm">The payment is recorded against the month selected above. For example, a payment made for March is recorded under March.</p>
       </div>
       <div className="panel">
         <div className="toolbar">
+          <input placeholder="Search member or member ID…" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="fld"><small>Year</small><input type="number" value={year} style={{ width: 90 }} onChange={(e) => setYear(Number(e.target.value) || year)} /></div>
-          <input placeholder="Search member…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="tablewrap">
           <table className="gridtable">
             <thead><tr><th>Name</th>{MONTHS.map((m) => <th key={m}>{m}</th>)}<th>Total</th></tr></thead>
-            <tbody>
-              {shown.map((m) => (
-                <tr key={m.id}>
-                  <td><b>{m.name}</b></td>
-                  {MONTHS.map((_, i) => (
-                    <td key={i}><input type="number" step="0.01" className="cellinput" value={valueFor(m.name, i + 1)} onChange={(e) => setValue(m.name, i + 1, e.target.value)} /></td>
-                  ))}
-                  <td><b>{money(rowTotal(m.name))}</b></td>
-                </tr>
-              ))}
-              {!shown.length && <tr><td colSpan={14} className="empty">No members match.</td></tr>}
-            </tbody>
-            {shown.length > 0 && (
-              <tfoot><tr><td><b>Monthly total</b></td>{MONTHS.map((_, i) => <td key={i}><b>{money(monthTotal(i + 1))}</b></td>)}<td><b>{money(grandTotal)}</b></td></tr></tfoot>
-            )}
+            <tbody>{shown.map((m) => <tr key={m.id}><td><b>{m.name}</b><br /><small>{m.member_code || ''}</small></td>{MONTHS.map((_, i) => <td key={i}><input type="number" min="0" step="0.01" className="cellinput" value={valueFor(m.name, i + 1)} onChange={(e) => setValue(m.name, i + 1, e.target.value)} /></td>)}<td><b>{money(rowTotal(m.name))}</b></td></tr>)}{!shown.length && <tr><td colSpan={14} className="empty">No members match.</td></tr>}</tbody>
+            {shown.length > 0 && <tfoot><tr><td><b>Monthly total</b></td>{MONTHS.map((_, i) => <td key={i}><b>{money(monthTotal(i + 1))}</b></td>)}<td><b>{money(grandTotal)}</b></td></tr></tfoot>}
           </table>
         </div>
       </div>
@@ -744,12 +815,6 @@ export function FirstFruit() {
   const { data } = useData();
   const roster = [...data.members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name));
   return <ContributionsGrid fund="First Fruit" roster={roster} title="First Fruit Register" />;
-}
-
-export function MonthlyContribution() {
-  const { data } = useData();
-  const roster = [...data.members].filter(m => m.status !== 'Inactive').sort((a,b)=>a.name.localeCompare(b.name));
-  return <ContributionsGrid fund="Monthly Contribution" roster={roster} title="Monthly Contribution Register" />;
 }
 
 export function WelfareDues() {
@@ -840,13 +905,13 @@ export function HeadcountAttendance() {
   const adultTotal=val('Adult Men')+val('Adult Women');
   const total=childrenTotal+omegaTotal+adultTotal;
   const saveAll=()=>{let n=0;HEADCOUNT_CATEGORIES.forEach(cat=>{if(!(cat in edits))return;const count=Number(edits[cat])||0;const rec=existing.get(cat);save('attendance_headcount',{id:rec?rec.id:uuid(),date,service,category:cat,count});n++;});setEdits({});alert(n?`Saved headcount for ${n} categor${n===1?'y':'ies'}. Total: ${total}.`:'No changes to save.');};
-  const history=[...new Set(data.attendance_headcount.map(r=>r.date+'|'+r.service))].sort().reverse().slice(0,10).map(k=>{const[d,s]=k.split('|');const rows=data.attendance_headcount.filter(r=>r.date===d&&r.service===s);const get=c=>rows.find(r=>r.category===c)?.count||0;return{date:d,service:s,children:get('Children Boys')+get('Children Girls'),omega:get('Youth Boys')+get('Youth Girls'),adults:get('Adult Men')+get('Adult Women'),total:rows.reduce((sum,r)=>sum+Number(r.count||0),0)};});
+  const history=[...new Set(data.attendance_headcount.map(r=>r.date+'|'+r.service))].sort().reverse().slice(0,10).map(k=>{const[d,s]=k.split('|');const rows=data.attendance_headcount.filter(r=>r.date===d&&r.service===s);const get=c=>Number(rows.find(r=>r.category===c)?.count||0);const childrenBoys=get('Children Boys'),childrenGirls=get('Children Girls'),omegaBoys=get('Youth Boys'),omegaGirls=get('Youth Girls'),adultMen=get('Adult Men'),adultWomen=get('Adult Women');return{date:d,service:s,childrenBoys,childrenGirls,omegaBoys,omegaGirls,adultMen,adultWomen,children:childrenBoys+childrenGirls,omega:omegaBoys+omegaGirls,adults:adultMen+adultWomen,total:rows.reduce((sum,r)=>sum+Number(r.count||0),0)};});
   return <><div className="top"><h1>Headcount Attendance</h1><button className="primary" onClick={saveAll}>Save headcount</button></div>
     <div className="panel"><div className="toolbar"><div className="fld"><small>Date</small><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}>{SERVICES.map(s=><option key={s}>{s}</option>)}</select></div></div>
       <div className="cards"><div className="card"><div className="label">Adults</div><strong>{adultTotal}</strong></div><div className="card"><div className="label">Omega</div><strong>{omegaTotal}</strong></div><div className="card"><div className="label">Children</div><strong>{childrenTotal}</strong></div><div className="card"><div className="label">Total attendance</div><strong>{total}</strong></div></div>
       <h2>Detailed breakdown</h2><div className="grid2">{HEADCOUNT_CATEGORIES.map(cat=><div className="fld" key={cat}><small>{headcountLabel(cat)}</small><input type="number" min="0" value={valueFor(cat)} onChange={e=>setEdits(ed=>({...ed,[cat]:e.target.value}))}/></div>)}</div>
     </div>
-    <div className="panel"><h2>Recent headcount breakdowns</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Service</th><th>Adults</th><th>Omega</th><th>Children</th><th>Total</th></tr></thead><tbody>{history.map(r=><tr key={r.date+r.service}><td>{r.date}</td><td>{r.service}</td><td>{r.adults}</td><td>{r.omega}</td><td>{r.children}</td><td><b>{r.total}</b></td></tr>)}{!history.length&&<tr><td colSpan="6" className="empty">No headcounts recorded yet.</td></tr>}</tbody></table></div></div>
+    <div className="panel"><h2>Recent headcount breakdowns</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Service</th><th>Adult Men</th><th>Adult Women</th><th>Omega Boys</th><th>Omega Girls</th><th>Children Boys</th><th>Children Girls</th><th>Total</th></tr></thead><tbody>{history.map(r=><tr key={r.date+r.service}><td>{r.date}</td><td>{r.service}</td><td>{r.adultMen}</td><td>{r.adultWomen}</td><td>{r.omegaBoys}</td><td>{r.omegaGirls}</td><td>{r.childrenBoys}</td><td>{r.childrenGirls}</td><td><b>{r.total}</b></td></tr>)}{!history.length&&<tr><td colSpan="9" className="empty">No headcounts recorded yet.</td></tr>}</tbody></table></div></div>
   </>;
 }
 

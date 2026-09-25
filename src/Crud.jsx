@@ -96,7 +96,9 @@ export default function Crud({
       out[f.key] = v;
     }
     if (Object.keys(errors).length) { setForm({ ...form, errors }); return; }
-    save(table, { ...(form.original || {}), ...out, id: form.original?.id || uuid() });
+    const recordId = form.original?.id || uuid();
+    const extra = table === 'members' && !form.original?.member_code ? { member_code: 'M-' + recordId.replaceAll('-', '').slice(0, 8).toUpperCase() } : {};
+    save(table, { ...(form.original || {}), ...out, ...extra, id: recordId });
     setForm(null);
   };
 
