@@ -79,3 +79,10 @@ This edition is tailored for a single church with three check-in groups: Adults,
 - Members receive a stable unique Member ID when created or imported.
 - Member Record provides a searchable Member ID view of linked attendance, First Fruit, Welfare Dues, receipts, payment requests, prayer requests, follow-ups and children.
 - Run `supabase/migration_24_member_records_contributions.sql`.
+
+
+## V25 updates
+- Administrators enter Member IDs manually. Duplicate IDs are blocked in the interface and by a unique database index.
+- Children now have a Quick Attendance section directly on the Children page.
+- Children Department attendance is stored in `attendance.child_id`, separate from adult/member attendance.
+- Run `supabase/migration_25_member_ids_children_attendance.sql`.
