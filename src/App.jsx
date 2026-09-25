@@ -3,7 +3,7 @@ import { configured } from './supabase';
 import { AuthProvider, useAuth, can } from './auth';
 import { DataProvider, useData } from './data';
 import {
-  Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
+  Dashboard, Members, Attendance, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
   WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup,
 } from './pages';
@@ -167,12 +167,11 @@ const NAV = [
   ] },
   { group: 'attendance', label: '✅ Attendance', items: [
     ['attendance', 'Attendance Records', Attendance, 'attendance'],
-    ['quickattendance', 'Quick Attendance', QuickAttendance, 'attendance'],
     ['adultcheckin', 'Adults Quick Attendance', AdultCheckIn, 'attendance'],
     ['omegacheckin', 'Omega Quick Attendance', OmegaCheckIn, 'attendance'],
     ['childrenattendance', 'Children Quick Attendance', ChildrenQuickAttendance, 'children'],
-    ['childcheckin', 'Children Check-in / Pickup', ChildCheckIn, 'child_checkins'],
-    ['headcount', 'Headcount Attendance', HeadcountAttendance, 'attendance_headcount'],
+    ['childcheckin', 'Children Pickup / Release', ChildCheckIn, 'child_checkins'],
+    ['headcount', 'Headcount', HeadcountAttendance, 'attendance_headcount'],
   ] },
   { group: 'events', label: '📅 Events', items: [
     ['events', 'Events', Events, 'events'],
