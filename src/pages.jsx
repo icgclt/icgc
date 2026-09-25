@@ -61,7 +61,7 @@ export function Dashboard() {
 }
 
 /* ---------------- Modules (all use the generic Crud component) ---------------- */
-const MEMBER_CSV_FIELDS = ['member_code', 'name', 'phone', 'email', 'dob', 'gender', 'member_type', 'grp', 'status', 'address', 'notes'];
+const MEMBER_CSV_FIELDS = ['member_code', 'name', 'phone', 'email', 'dob', 'gender', 'member_type', 'grp', 'status', 'address', 'parent1_name', 'parent1_phone', 'parent1_relationship', 'parent2_name', 'parent2_phone', 'parent2_relationship', 'notes'];
 
 function MemberImport() {
   const { data, save } = useData();
@@ -72,7 +72,7 @@ function MemberImport() {
   if (!can(role, 'members', 'write')) return null;
 
   const downloadTemplate = () =>
-    download('members-template.csv', '\ufeff' + MEMBER_CSV_FIELDS.join(',') + '\r\n' + 'Jane Doe,0244000000,,,Female,Youth,Active,,\r\n', 'text/csv;charset=utf-8');
+    download('members-template.csv', '\ufeff' + MEMBER_CSV_FIELDS.join(',') + '\r\n' + 'M-001,Jane Doe,0244000000,,,Female,Adult,,Active,,,,,,,,\r\n', 'text/csv;charset=utf-8');
 
   const importCSV = async (e) => {
     const file = e.target.files[0];
@@ -95,7 +95,7 @@ function MemberImport() {
         const duplicate = data.members.find(m => String(m.member_code || '').trim().toLowerCase() === memberCode.toLowerCase() && m.id !== match?.id);
         if (duplicate) { skipped++; continue; }
         const importId = match ? match.id : uuid();
-        save('members', {
+        const importedMember = {
           id: importId,
           member_code: memberCode,
           name,
@@ -107,8 +107,29 @@ function MemberImport() {
           grp: r.grp || r.group || match?.grp || '',
           status: STATUS.includes(status) ? status : 'Active',
           address: r.address || match?.address || '',
+          parent1_name: r.parent1_name || match?.parent1_name || '',
+          parent1_phone: r.parent1_phone || match?.parent1_phone || '',
+          parent1_relationship: r.parent1_relationship || match?.parent1_relationship || '',
+          parent2_name: r.parent2_name || match?.parent2_name || '',
+          parent2_phone: r.parent2_phone || match?.parent2_phone || '',
+          parent2_relationship: r.parent2_relationship || match?.parent2_relationship || '',
           notes: r.notes || match?.notes || '',
-        });
+        };
+        save('members', importedMember);
+        if (memberType === 'Child') {
+          const existingChild = (data.children || []).find(c => c.member_id === importId);
+          save('children', {
+            ...(existingChild || {}),
+            id: existingChild?.id || uuid(),
+            member_id: importId,
+            name,
+            dob: importedMember.dob || null,
+            gender: importedMember.gender || null,
+            guardian_name: [importedMember.parent1_name, importedMember.parent2_name].filter(Boolean).join(' / '),
+            guardian_phone: [importedMember.parent1_phone, importedMember.parent2_phone].filter(Boolean).join(' / '),
+            status: importedMember.status === 'Inactive' ? 'Inactive' : 'Active',
+          });
+        }
         match ? updated++ : added++;
       }
       setMsg({ ok: true, text: `Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped (missing name)` : ''}.` });
@@ -140,35 +161,75 @@ function MemberImport() {
 }
 
 export function Members() {
+  const { data, save } = useData();
+
+  function syncChildFromMember(record, original) {
+    const existingChild = (data.children || []).find(c => c.member_id === record.id);
+    if (record.member_type === 'Child') {
+      const child = {
+        ...(existingChild || {}),
+        id: existingChild?.id || uuid(),
+        member_id: record.id,
+        name: record.name,
+        dob: record.dob || null,
+        gender: record.gender || null,
+        guardian_name: [record.parent1_name, record.parent2_name].filter(Boolean).join(' / '),
+        guardian_phone: [record.parent1_phone, record.parent2_phone].filter(Boolean).join(' / '),
+        pickup_notes: existingChild?.pickup_notes || '',
+        medical_notes: existingChild?.medical_notes || '',
+        status: record.status === 'Inactive' ? 'Inactive' : 'Active',
+      };
+      save('children', child);
+    } else if (original?.member_type === 'Child' && existingChild) {
+      save('children', { ...existingChild, status: 'Inactive' });
+    }
+  }
+
   return (
     <>
       <MemberImport />
       <Crud
-      table="members" title="Members" noun="member"
-      sortKey="name" searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
-      filters={[{ key: 'status', label: 'All statuses', options: STATUS }]}
-      defaults={{ status: 'Active', member_type: 'Adult' }}
-      fields={[
-        { key: 'member_code', label: 'Unique Member ID', required: true, unique: true },
-        { key: 'name', label: 'Name', required: true },
-        { key: 'phone', label: 'Phone', type: 'tel' },
-        { key: 'email', label: 'Email', type: 'email' },
-        { key: 'dob', label: 'Date of birth', type: 'date' },
-        { key: 'gender', label: 'Gender', type: 'select', options: ['Male', 'Female'] },
-        { key: 'member_type', label: 'Church Group', type: 'select', options: ['Adult', 'Omega', 'Child'], required: true },
-        { key: 'grp', label: 'Group / Cell' },
-        { key: 'status', label: 'Status', type: 'select', options: STATUS, required: true },
-        { key: 'address', label: 'Address' },
-        { key: 'notes', label: 'Notes', type: 'textarea', full: true },
-      ]}
-      columns={[
-        { label: 'Member ID', render: (m) => <b>{m.member_code || 'Not assigned'}</b> },
-        { label: 'Name', render: (m) => <><b>{m.name}</b><br /><small>{m.email}</small></> },
-        { label: 'Phone', key: 'phone' },
-        { label: 'Group', key: 'grp' },
-        { label: 'Status', render: (m) => badge(m.status) },
-      ]}
+        table="members" title="Members" noun="member"
+        sortKey="name" searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
+        filters={[
+          { key: 'status', label: 'All statuses', options: STATUS },
+          { key: 'member_type', label: 'All church groups', options: ['Adult', 'Omega', 'Child'] },
+        ]}
+        defaults={{ status: 'Active', member_type: 'Adult' }}
+        onSaved={syncChildFromMember}
+        fields={[
+          { key: 'member_code', label: 'Unique Member ID', required: true, unique: true },
+          { key: 'name', label: 'Name', required: true },
+          { key: 'phone', label: 'Phone', type: 'tel' },
+          { key: 'email', label: 'Email', type: 'email' },
+          { key: 'dob', label: 'Date of birth', type: 'date' },
+          { key: 'gender', label: 'Gender', type: 'select', options: ['Male', 'Female'] },
+          { key: 'member_type', label: 'Church Group', type: 'select', options: ['Adult', 'Omega', 'Child'], required: true },
+          { key: 'grp', label: 'Group / Cell' },
+          { key: 'status', label: 'Status', type: 'select', options: STATUS, required: true },
+          { key: 'address', label: 'Address' },
+          { key: 'parent1_name', label: 'Parent / Guardian 1 Name', showIf: v => v.member_type === 'Child' },
+          { key: 'parent1_phone', label: 'Parent / Guardian 1 Phone', type: 'tel', showIf: v => v.member_type === 'Child' },
+          { key: 'parent1_relationship', label: 'Parent / Guardian 1 Relationship', placeholder: 'Father, Mother, Guardian…', showIf: v => v.member_type === 'Child' },
+          { key: 'parent2_name', label: 'Parent / Guardian 2 Name', showIf: v => v.member_type === 'Child' },
+          { key: 'parent2_phone', label: 'Parent / Guardian 2 Phone', type: 'tel', showIf: v => v.member_type === 'Child' },
+          { key: 'parent2_relationship', label: 'Parent / Guardian 2 Relationship', placeholder: 'Mother, Father, Guardian…', showIf: v => v.member_type === 'Child' },
+          { key: 'notes', label: 'Notes', type: 'textarea', full: true },
+        ]}
+        columns={[
+          { label: 'Member ID', render: (m) => <b>{m.member_code || 'Not assigned'}</b> },
+          { label: 'Name', render: (m) => <><b>{m.name}</b><br /><small>{m.email}</small></> },
+          { label: 'Church Group', render: (m) => <span className="badge">{m.member_type || 'Adult'}</span> },
+          { label: 'Phone', key: 'phone' },
+          { label: 'Group', key: 'grp' },
+          { label: 'Status', render: (m) => badge(m.status) },
+        ]}
       />
+      <div className="panel" style={{ marginTop: 16 }}>
+        <h2>Children in the Members database</h2>
+        <p className="muted">Children are entered from the Members screen. Select <b>Child</b> as the Church Group and the parent/guardian particulars will appear automatically.</p>
+        <p className="muted sm">Each child is also linked to the internal Children attendance record so the Children's attendance and secure pickup functions continue to work.</p>
+      </div>
     </>
   );
 }
@@ -206,7 +267,7 @@ export function MemberLookup() {
     {member && <>
       <div className="panel"><div className="top" style={{marginBottom:8}}><div><h2 style={{margin:0}}>{member.name}</h2><div className="muted">Member ID: <b>{member.member_code || 'Not assigned'}</b> · {member.phone || 'No phone'} · {member.status || ''}</div></div></div><div className="cards"><div className="card"><span className="label">Attendance</span><strong>{attendance.filter(a=>a.status==='Present').length}</strong></div><div className="card"><span className="label">First Fruit</span><strong>{money(totalFirstFruit)}</strong></div><div className="card"><span className="label">Welfare Dues</span><strong>{money(totalWelfare)}</strong></div><div className="card"><span className="label">Paid Receipts</span><strong>{money(totalReceipts)}</strong></div><div className="card"><span className="label">Prayer Requests</span><strong>{prayers.length}</strong></div><div className="card"><span className="label">Follow-ups</span><strong>{followups.length}</strong></div></div></div>
       <div className="grid2">
-        <div className="panel"><h2>Personal information</h2><p><b>Member ID:</b> {member.member_code || ''}</p><p><b>Gender:</b> {member.gender || 'Not recorded'}</p><p><b>Date of birth:</b> {member.dob || 'Not recorded'}</p><p><b>Group:</b> {member.grp || 'Not assigned'}</p><p><b>Phone:</b> {member.phone || ''}</p><p><b>Email:</b> {member.email || ''}</p><p><b>Address:</b> {member.address || ''}</p><p><b>Occupation:</b> {member.occupation || ''}</p></div>
+        <div className="panel"><h2>Personal information</h2><p><b>Member ID:</b> {member.member_code || ''}</p><p><b>Church Group:</b> {member.member_type || 'Adult'}</p><p><b>Gender:</b> {member.gender || 'Not recorded'}</p><p><b>Date of birth:</b> {member.dob || 'Not recorded'}</p><p><b>Group:</b> {member.grp || 'Not assigned'}</p><p><b>Phone:</b> {member.phone || ''}</p><p><b>Email:</b> {member.email || ''}</p><p><b>Address:</b> {member.address || ''}</p><p><b>Occupation:</b> {member.occupation || ''}</p>{member.member_type === 'Child' && <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid var(--border)'}}><h3 style={{marginTop:0}}>Parent / Guardian Particulars</h3><p><b>{member.parent1_relationship || 'Parent / Guardian 1'}:</b> {member.parent1_name || 'Not recorded'} · {member.parent1_phone || 'No phone'}</p><p><b>{member.parent2_relationship || 'Parent / Guardian 2'}:</b> {member.parent2_name || 'Not recorded'} · {member.parent2_phone || 'No phone'}</p></div>}</div>
         <div className="panel"><h2>Children / dependants</h2>{children.length ? children.map(c=><div className="listrow" key={c.id}><b>{c.name}</b><span className="muted">{c.gender || ''} · {c.dob || ''}</span></div>) : <div className="empty">No linked children.</div>}</div>
       </div>
       <div className="panel"><h2>Attendance history</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Service</th><th>Status</th><th>Note</th></tr></thead><tbody>{attendance.slice(0,50).map(r=><tr key={r.id}><td>{r.date}</td><td>{r.service}</td><td>{badge(r.status)}</td><td>{r.note || ''}</td></tr>)}{!attendance.length&&<tr><td colSpan="4" className="empty">No attendance records linked to this member.</td></tr>}</tbody></table></div></div>
@@ -1410,6 +1471,42 @@ export function Children() {
   </>;
 }
 
+export function ChildrenQuickAttendance() {
+  const { data, save } = useData();
+  const [q, setQ] = useState('');
+  const [service, setService] = useState("Children's Service");
+  const [msg, setMsg] = useState('');
+  const active = (data.children || []).filter(c => c.status === 'Active');
+  const results = q.trim()
+    ? active.filter(c => `${c.name} ${c.guardian_name || ''} ${c.guardian_phone || ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 30)
+    : active.slice(0, 30);
+  const checked = new Set((data.attendance || [])
+    .filter(a => a.date === today() && a.service === service && a.status === 'Present' && a.child_id)
+    .map(a => a.child_id));
+  function checkIn(c) {
+    if (checked.has(c.id)) { setMsg(`${c.name} is already marked present for ${service}.`); return; }
+    save('attendance', { id: uuid(), date: today(), service, person_name: c.name, child_id: c.id, status: 'Present', note: 'Children Department quick attendance' });
+    setMsg(`${c.name} marked present.`);
+  }
+  return <>
+    <div className="top"><div><h1>Children Quick Attendance</h1><div className="muted">Record Children's attendance from the Attendance menu. Child registration and parent particulars are managed under Members.</div></div></div>
+    <div className="panel">
+      <div className="toolbar">
+        <div className="fld"><small>Children service</small><select value={service} onChange={e => setService(e.target.value)}><option>Children's Service</option><option>Sunday School</option><option>Children's Special Program</option></select></div>
+        <input placeholder="Search child or parent/guardian" value={q} onChange={e => setQ(e.target.value)} />
+      </div>
+      {msg && <p className="muted">{msg}</p>}
+      <div className="quicklist">
+        {results.map(c => <button key={c.id} className="quickrow" onClick={() => checkIn(c)} disabled={checked.has(c.id)}>
+          <span><b>{c.name}</b><br /><small>{c.gender || ''}{c.guardian_name ? ` · ${c.guardian_name}` : ''}</small></span>
+          <span className="badge">{checked.has(c.id) ? 'Present' : 'Check in'}</span>
+        </button>)}
+        {!results.length && <div className="empty">No active children found.</div>}
+      </div>
+    </div>
+  </>;
+}
+
 export function ChildCheckIn() {
   const {data,save}=useData();
   const [q,setQ]=useState('');
@@ -1649,7 +1746,7 @@ export function AutomationCenter() {
   function queueVisitors(){let n=0;recentVisitors.forEach(v=>{const m={id:null,name:v.name,phone:v.phone};if(visitorTemplate&&enqueue(m,visitorTemplate,'New Visitor',personalize(visitorTemplate.body,m)))n++;});setRunMsg(`${n} visitor follow-up message${n===1?'':'s'} queued.`);}
   return <>
     <div className="top"><div><h1>Automation Center</h1><div className="muted">Prepare birthday and new-visitor messages without sending anything until a provider is connected.</div></div></div>
-    <div className="panel"><div className="toolbar"><div className="fld"><small>Channel</small><select value={channel} onChange={e=>setChannel(e.target.value)}><option>SMS</option><option>WhatsApp</option><option>Email</option><option>In-app</option></select></div><button className="primary" onClick={queueBirthdays} disabled={!birthdayTemplate}>Queue today's birthdays</button><button onClick={queueVisitors} disabled={!visitorTemplate}>Queue new visitor follow-up</button></div>{runMsg&&<p className="muted">{runMsg}</p>}<p className="muted sm">Templates use {{name}} and {{church}} placeholders. Queued messages stay in the Communication Queue until a connected provider sends them.</p></div>
+    <div className="panel"><div className="toolbar"><div className="fld"><small>Channel</small><select value={channel} onChange={e=>setChannel(e.target.value)}><option>SMS</option><option>WhatsApp</option><option>Email</option><option>In-app</option></select></div><button className="primary" onClick={queueBirthdays} disabled={!birthdayTemplate}>Queue today's birthdays</button><button onClick={queueVisitors} disabled={!visitorTemplate}>Queue new visitor follow-up</button></div>{runMsg&&<p className="muted">{runMsg}</p>}<p className="muted sm">Templates use {'{{name}}'} and {'{{church}}'} placeholders. Queued messages stay in the Communication Queue until a connected provider sends them.</p></div>
     <div className="cards"><div className="card"><span className="label">Birthdays today</span><strong>{birthdays.length}</strong></div><div className="card"><span className="label">Visitors this month</span><strong>{recentVisitors.length}</strong></div><div className="card"><span className="label">Active templates</span><strong>{templates.length}</strong></div><div className="card"><span className="label">Queued</span><strong>{(data.communication_queue||[]).filter(q=>q.status==='Queued').length}</strong></div></div>
     <div className="grid2"><div className="panel"><h2>Today's birthdays</h2>{birthdays.length?birthdays.map(m=><div className="listrow" key={m.id}><b>{m.name}</b><span className="muted"> · {m.phone}</span></div>):<div className="empty">No birthdays with phone numbers today.</div>}</div><div className="panel"><h2>Recent visitors</h2>{recentVisitors.length?recentVisitors.slice(0,20).map(v=><div className="listrow" key={v.id}><b>{v.name}</b><span className="muted"> · {v.visit_date} · {v.phone}</span></div>):<div className="empty">No visitors with phone numbers this month.</div>}</div></div>
   </>;

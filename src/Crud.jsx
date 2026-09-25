@@ -26,6 +26,7 @@ function Field({ f, value, error, onChange, list }) {
         min={f.min}
         list={list ? 'dl_' + f.key : undefined}
         autoComplete="off"
+        placeholder={f.placeholder}
       />
     );
   }
@@ -41,7 +42,7 @@ function Field({ f, value, error, onChange, list }) {
 
 export default function Crud({
   table, title, noun, fields, columns,
-  filters = [], searchKeys = [], sortKey, sortDir = 'asc', defaults = {}, suggest = {},
+  filters = [], searchKeys = [], sortKey, sortDir = 'asc', defaults = {}, suggest = {}, onSaved,
 }) {
   const { data, save, remove } = useData();
   const { role } = useAuth();
@@ -83,6 +84,8 @@ export default function Crud({
     const errors = {};
     const out = {};
     for (const f of fields) {
+      const visible = !f.showIf || f.showIf(form.values);
+      if (!visible) continue;
       let v = form.values[f.key];
       if (typeof v === 'string' && f.type !== 'checkbox') v = v.trim();
       if (v === '' && f.fallback) v = f.fallback;
@@ -107,7 +110,9 @@ export default function Crud({
       }
     }
     const recordId = form.original?.id || uuid();
-    save(table, { ...(form.original || {}), ...out, id: recordId });
+    const record = { ...(form.original || {}), ...out, id: recordId };
+    save(table, record);
+    if (onSaved) onSaved(record, form.original || null);
     setForm(null);
   };
 
@@ -182,7 +187,7 @@ export default function Crud({
               <button type="button" className="x" onClick={() => setForm(null)}>×</button>
             </div>
             <div className="formgrid">
-              {fields.map((f) => (
+              {fields.filter((f) => !f.showIf || f.showIf(form.values)).map((f) => (
                 <Field
                   key={f.key}
                   f={f}

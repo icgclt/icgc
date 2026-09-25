@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, Children, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup,
+  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup,
 } from './pages';
 import { DepartmentDashboard } from './operational';
 
@@ -151,13 +151,9 @@ function Pending() {
 const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
   ['memberportal', '🙋 My Church', MemberPortal, null],
-  ['members', '👥 Members', Members, 'members'],
-  ['memberrecord', '🔎 Member Record', MemberLookup, 'members'],
-  ['children', '🧒 Children', Children, 'children'],
-  { group: 'checkin', label: '🟢 Check-in', items: [
-    ['adultcheckin', 'Adults', AdultCheckIn, 'attendance'],
-    ['omegacheckin', 'Omega (Youth)', OmegaCheckIn, 'attendance'],
-    ['childcheckin', 'Children', ChildCheckIn, 'child_checkins'],
+  { group: 'members', label: '👥 Members', items: [
+    ['members', 'Members', Members, 'members'],
+    ['memberrecord', 'Member Record', MemberLookup, 'members'],
   ] },
   ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors'],
   ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
@@ -172,6 +168,10 @@ const NAV = [
   { group: 'attendance', label: '✅ Attendance', items: [
     ['attendance', 'Attendance Records', Attendance, 'attendance'],
     ['quickattendance', 'Quick Attendance', QuickAttendance, 'attendance'],
+    ['adultcheckin', 'Adults Quick Attendance', AdultCheckIn, 'attendance'],
+    ['omegacheckin', 'Omega Quick Attendance', OmegaCheckIn, 'attendance'],
+    ['childrenattendance', 'Children Quick Attendance', ChildrenQuickAttendance, 'children'],
+    ['childcheckin', 'Children Check-in / Pickup', ChildCheckIn, 'child_checkins'],
     ['headcount', 'Headcount Attendance', HeadcountAttendance, 'attendance_headcount'],
   ] },
   { group: 'events', label: '📅 Events', items: [
