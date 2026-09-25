@@ -81,7 +81,7 @@ async function send(op) {
 }
 
 export function DataProvider({ uid, role, children }) {
-  const ACTIVE_TABLES = role === 'member' ? ['members','attendance','giving','events','prayer_requests','event_registrations','announcements','payment_requests','payment_receipts','member_notification_preferences'] : TABLES;
+  const ACTIVE_TABLES = role === 'member' ? ['members','attendance','giving','events','prayer_requests','announcements','payment_requests','payment_receipts','member_notification_preferences'] : TABLES;
   const ck = (t) => `cm:${uid}:cache:${t}`;
   const okey = `cm:${uid}:outbox`;
   const skey = `cm:${uid}:sensitive-outbox`;

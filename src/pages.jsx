@@ -9,6 +9,7 @@ const STATUS = ['Active', 'Inactive', 'Visitor'];
 const SERVICES = ['Sunday Service', 'Midweek Service', 'Prayer Meeting', 'Other'];
 const OFFERING_CATEGORIES = ['Main Offering', 'Project Offering', "Children's Offering", 'First Fruit', 'Weekday Offering', 'Donation', 'Thanksgiving', 'Pledges'];
 const HEADCOUNT_CATEGORIES = ['Children Boys', 'Children Girls', 'Youth Boys', 'Youth Girls', 'Adult Men', 'Adult Women'];
+const headcountLabel = (cat) => cat.replace('Youth Boys', 'Omega Boys').replace('Youth Girls', 'Omega Girls');
 const badge = (v) => <span className="badge">{v}</span>;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -18,7 +19,7 @@ export function Dashboard() {
   const { role, profile } = useAuth();
   const showGiving = can(role, 'giving', 'read');
   const month = today().slice(0, 7);
-  const monthGiving = data.giving.filter((g) => String(g.date).startsWith(month)).reduce((a, g) => a + Number(g.amount), 0);
+  const monthGiving = data.offering_entries.filter((g) => String(g.date).startsWith(month)).reduce((a, g) => a + Number(g.amount), 0);
   const active = data.members.filter((m) => m.status === 'Active').length;
   const lastDate = data.attendance.map((a) => a.date).sort().pop();
   const lastPresent = data.attendance.filter((a) => a.date === lastDate && a.status === 'Present').length;
@@ -36,7 +37,7 @@ export function Dashboard() {
       <div className="cards">
         <div className="card"><div className="label">Active members</div><div className="num">{active}</div><div className="muted sm">{data.members.length} total</div></div>
         <div className="card"><div className="label">Last attendance{lastDate ? ` (${lastDate})` : ''}</div><div className="num">{lastPresent}</div><div className="muted sm">present</div></div>
-        {showGiving && <div className="card"><div className="label">Giving this month</div><div className="num" style={{ fontSize: 22 }}>{money(monthGiving)}</div></div>}
+        {showGiving && <div className="card"><div className="label">Offering this month</div><div className="num" style={{ fontSize: 22 }}>{money(monthGiving)}</div></div>}
         <div className="card"><div className="label">Departments</div><div className="num">{data.departments.length}</div></div>
         <div className="card"><div className="label">New visitors</div><div className="num">{data.visitors.filter(v => v.visit_date === today()).length}</div><div className="muted sm">today</div></div>
         <div className="card"><div className="label">Open follow-ups</div><div className="num">{data.follow_ups.filter(f => f.status === 'Open' || f.status === 'In Progress').length}</div></div>
@@ -51,7 +52,7 @@ export function Dashboard() {
         <div className="panel">
           <h2>Upcoming events</h2>
           {upcoming.length ? upcoming.map((e) => (
-            <p key={e.id}><b>{e.title}</b><br /><span className="muted">{e.date}{e.location ? ` · ${e.location}` : ''}</span></p>
+            <p key={e.id}><b>{e.title}</b><br /><span className="muted">{e.date}{e.event_time ? ` · ${e.event_time}` : ''}{e.location ? ` · ${e.location}` : ''}</span></p>
           )) : <div className="empty">No upcoming events.</div>}
         </div>
       </div>
@@ -505,19 +506,35 @@ export function ServiceTimer() {
   const KEY = 'cm:service-timer:v1';
   const defaults = [{id:uuid(),person:'Worship Leader',role:'Worship',minutes:15},{id:uuid(),person:'Announcements',role:'Announcements',minutes:5},{id:uuid(),person:'Offering',role:'Offering',minutes:10},{id:uuid(),person:'Preacher',role:'Sermon',minutes:45}];
   const [items,setItems]=useState(()=>{try{const x=JSON.parse(localStorage.getItem(KEY));return Array.isArray(x)&&x.length?x:defaults;}catch{return defaults;}});
-  const [active,setActive]=useState(null),[remaining,setRemaining]=useState(0),[running,setRunning]=useState(false),[overtime,setOvertime]=useState(false),[projector,setProjector]=useState(false);
   useEffect(()=>{try{localStorage.setItem(KEY,JSON.stringify(items));}catch{}},[items]);
-  useEffect(()=>{if(!running)return;const t=setInterval(()=>setRemaining(v=>{if(v<=1){setRunning(false);setOvertime(true);return 0;}return v-1;}),1000);return()=>clearInterval(t);},[running]);
-  const start=i=>{setActive(i);setRemaining(Math.max(1,Number(items[i].minutes)||1)*60);setOvertime(false);setRunning(true);};
-  const reset=()=>{if(active===null)return;setRemaining(Math.max(1,Number(items[active].minutes)||1)*60);setOvertime(false);setRunning(false);};
-  const next=()=>{if(active!==null&&active<items.length-1)start(active+1);};
   const add=()=>setItems(x=>[...x,{id:uuid(),person:'New person',role:'Programme item',minutes:5}]);
   const update=(id,k,v)=>setItems(x=>x.map(r=>r.id===id?{...r,[k]:k==='minutes'?Math.max(1,Number(v)||1):v}:r));
   const remove=id=>setItems(x=>x.filter(r=>r.id!==id));
+  return <>
+    <div className="top"><div><h1>Service Countdown · Timer Setup</h1><div className="muted">Set the people or programme items and their durations. Use Live Countdown when the service starts.</div></div></div>
+    <div className="panel"><div className="toolbar"><button onClick={add}>+ Add programme item</button><button onClick={()=>setItems(defaults.map(x=>({...x,id:uuid()})))}>Restore sample</button></div></div>
+    <div className="panel"><div className="tablewrap"><table><thead><tr><th>#</th><th>Person / item</th><th>Role</th><th>Minutes</th><th></th></tr></thead><tbody>{items.map((r,i)=><tr key={r.id}><td>{i+1}</td><td><input value={r.person} onChange={e=>update(r.id,'person',e.target.value)}/></td><td><input value={r.role} onChange={e=>update(r.id,'role',e.target.value)}/></td><td><input type="number" min="1" value={r.minutes} onChange={e=>update(r.id,'minutes',e.target.value)} style={{width:90}}/></td><td className="actions"><button className="danger" onClick={()=>remove(r.id)}>Remove</button></td></tr>)}</tbody></table></div></div>
+    <div className="panel"><h2>Ready for service</h2><p className="muted">Go to <b>Service Countdown → Live Countdown</b> to select the current item and display its countdown.</p></div>
+  </>;
+}
+
+export function ServiceTimerLive() {
+  const KEY='cm:service-timer:v1';
+  const [items,setItems]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY))||[];}catch{return[];}});
+  const [active,setActive]=useState(0),[remaining,setRemaining]=useState(0),[running,setRunning]=useState(false),[overtime,setOvertime]=useState(false);
+  useEffect(()=>{const load=()=>{try{const x=JSON.parse(localStorage.getItem(KEY));if(Array.isArray(x))setItems(x);}catch{}};load();window.addEventListener('storage',load);return()=>window.removeEventListener('storage',load);},[]);
+  useEffect(()=>{if(active>=items.length)setActive(Math.max(0,items.length-1));},[items.length,active]);
+  useEffect(()=>{if(!running)return;const t=setInterval(()=>setRemaining(v=>{if(v<=1){setRunning(false);setOvertime(true);return 0;}return v-1;}),1000);return()=>clearInterval(t);},[running]);
+  const start=i=>{setActive(i);setRemaining(Math.max(1,Number(items[i]?.minutes)||1)*60);setOvertime(false);setRunning(true);};
+  const reset=()=>{if(!items[active])return;setRemaining(Math.max(1,Number(items[active].minutes)||1)*60);setOvertime(false);setRunning(false);};
+  const next=()=>{if(active<items.length-1)start(active+1);};
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
-  const full=async()=>{try{await document.documentElement.requestFullscreen?.();}catch{}setProjector(true);};
-  if(projector)return <div className="timer-projector" onClick={()=>setProjector(false)}><div className="timer-projector-title">{active!==null?items[active].person:'Service Timer'}</div><div className={'timer-projector-clock '+(overtime?'overtime':'')}>{overtime?'TIME UP':fmt(remaining)}</div><div className="timer-projector-role">{active!==null?`${items[active].role} · ${items[active].minutes} minutes`:'Select a programme item to begin'}</div><div className="timer-projector-help">Click to return to controls</div></div>;
-  return <><div className="top"><div><h1>Service Countdown Timer</h1><div className="muted">Set a duration for each person or programme item. Projector Mode shows the countdown in large text.</div></div><button className="primary" onClick={full}>Projector Mode</button></div><div className="panel"><div className="toolbar"><button onClick={add}>+ Add programme item</button><button onClick={()=>setItems(defaults.map(x=>({...x,id:uuid()})))}>Restore sample</button></div></div><div className="panel"><div className="tablewrap"><table><thead><tr><th>#</th><th>Person / item</th><th>Role</th><th>Minutes</th><th></th></tr></thead><tbody>{items.map((r,i)=><tr key={r.id}><td>{i+1}</td><td><input value={r.person} onChange={e=>update(r.id,'person',e.target.value)}/></td><td><input value={r.role} onChange={e=>update(r.id,'role',e.target.value)}/></td><td><input type="number" min="1" value={r.minutes} onChange={e=>update(r.id,'minutes',e.target.value)} style={{width:90}}/></td><td className="actions"><button className="primary" onClick={()=>start(i)}>Start</button><button className="danger" onClick={()=>remove(r.id)}>Remove</button></td></tr>)}</tbody></table></div></div><div className="panel timer-control"><div className="timer-current"><div className="label">Current item</div><h2>{active!==null?items[active].person:'No item selected'}</h2><div className={'timer-clock '+(overtime?'overtime':'')}>{overtime?'TIME UP':fmt(remaining)}</div><div className="toolbar"><button onClick={()=>setRunning(x=>!x)} disabled={active===null}>{running?'Pause':'Resume'}</button><button onClick={reset} disabled={active===null}>Reset</button><button className="primary" onClick={next} disabled={active===null||active>=items.length-1}>Next</button><button onClick={full}>Projector Mode</button></div></div></div></>;
+  if(!items.length)return <div className="panel"><h1>Live Countdown</h1><p className="muted">No timer items yet. Add them under Service Countdown → Timer Setup.</p></div>;
+  const current=items[active];
+  return <div className="timer-live-page">
+    <div className="timer-live-head"><div><div className="timer-live-church">{import.meta.env.VITE_CHURCH_NAME || 'Church'}</div><h1>{current?.person||'Service Countdown'}</h1><div className="timer-live-role">{current?.role||''}</div></div><select value={active} onChange={e=>{setRunning(false);setOvertime(false);setActive(Number(e.target.value));setRemaining(0);}}>{items.map((x,i)=><option key={x.id} value={i}>{i+1}. {x.person}</option>)}</select></div>
+    <div className="timer-live-main"><div className={'timer-live-clock '+(overtime?'overtime':'')}>{overtime?'TIME UP':fmt(remaining)}</div><div className="timer-live-meta">{current?.minutes||0} minutes</div><div className="timer-live-actions"><button className="primary" onClick={()=>remaining?setRunning(x=>!x):start(active)}>{running?'Pause':remaining?'Resume':'Start'}</button><button className="secondary" onClick={reset}>Reset</button><button className="secondary" onClick={next} disabled={active>=items.length-1}>Next</button></div><p className="muted sm">This view fills the available screen for projection.</p></div>
+  </div>;
 }
 
 /* ---------------- SMS ---------------- */
@@ -729,9 +746,15 @@ export function FirstFruit() {
   return <ContributionsGrid fund="First Fruit" roster={roster} title="First Fruit Register" />;
 }
 
+export function MonthlyContribution() {
+  const { data } = useData();
+  const roster = [...data.members].filter(m => m.status !== 'Inactive').sort((a,b)=>a.name.localeCompare(b.name));
+  return <ContributionsGrid fund="Monthly Contribution" roster={roster} title="Monthly Contribution Register" />;
+}
+
 export function WelfareDues() {
   const { data } = useData();
-  const roster = [...data.welfare_members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name));
+  const roster = [...data.members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name));
   return <ContributionsGrid fund="Welfare Dues" roster={roster} title="Welfare Dues" />;
 }
 
@@ -808,76 +831,23 @@ export function HeadcountAttendance() {
   const [date, setDate] = useState(today());
   const [service, setService] = useState('Sunday Service');
   const [edits, setEdits] = useState({});
-
-  const existing = useMemo(() => {
-    const map = new Map();
-    data.attendance_headcount.forEach((r) => { if (r.date === date && r.service === service) map.set(r.category, r); });
-    return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.attendance_headcount, date, service]);
-
-  useEffect(() => { setEdits({}); }, [date, service]);
-
-  const valueFor = (cat) => (cat in edits ? edits[cat] : String(existing.get(cat)?.count ?? ''));
-  const total = HEADCOUNT_CATEGORIES.reduce((s, c) => s + (Number(valueFor(c)) || 0), 0);
-
-  const saveAll = () => {
-    let n = 0;
-    HEADCOUNT_CATEGORIES.forEach((cat) => {
-      if (!(cat in edits)) return;
-      const count = Number(edits[cat]) || 0;
-      const rec = existing.get(cat);
-      save('attendance_headcount', { id: rec ? rec.id : uuid(), date, service, category: cat, count });
-      n++;
-    });
-    setEdits({});
-    alert(n ? `Saved headcount for ${n} categor${n === 1 ? 'y' : 'ies'}. Total: ${total}.` : 'No changes to save.');
-  };
-
-  const history = [...new Set(data.attendance_headcount.map((r) => r.date + '|' + r.service))]
-    .sort().reverse().slice(0, 10)
-    .map((k) => {
-      const [d, s] = k.split('|');
-      const rows = data.attendance_headcount.filter((r) => r.date === d && r.service === s);
-      const t = rows.reduce((sum, r) => sum + r.count, 0);
-      return { date: d, service: s, total: t };
-    });
-
-  return (
-    <>
-      <div className="top">
-        <h1>Headcount Attendance</h1>
-        <button className="primary" onClick={saveAll}>Save headcount</button>
-      </div>
-      <div className="panel">
-        <div className="toolbar">
-          <div className="fld"><small>Date</small><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-          <div className="fld"><small>Service</small>
-            <select value={service} onChange={(e) => setService(e.target.value)}>{SERVICES.map((s) => <option key={s}>{s}</option>)}</select>
-          </div>
-        </div>
-        <div className="grid2">
-          {HEADCOUNT_CATEGORIES.map((cat) => (
-            <div className="fld" key={cat}>
-              <small>{cat}</small>
-              <input type="number" min="0" value={valueFor(cat)} onChange={(e) => setEdits((ed) => ({ ...ed, [cat]: e.target.value }))} />
-            </div>
-          ))}
-        </div>
-        <p className="muted sm" style={{ marginTop: 12 }}>Total for this service: <b>{total}</b></p>
-      </div>
-      <div className="panel">
-        <h2>Recent tallies</h2>
-        <div className="tablewrap"><table>
-          <thead><tr><th>Date</th><th>Service</th><th>Total</th></tr></thead>
-          <tbody>
-            {history.map((r) => <tr key={r.date + r.service}><td>{r.date}</td><td>{r.service}</td><td>{r.total}</td></tr>)}
-            {!history.length && <tr><td colSpan="3" className="empty">No headcounts recorded yet.</td></tr>}
-          </tbody>
-        </table></div>
-      </div>
-    </>
-  );
+  const existing = useMemo(() => { const map=new Map(); data.attendance_headcount.forEach(r=>{if(r.date===date&&r.service===service)map.set(r.category,r);}); return map; }, [data.attendance_headcount,date,service]);
+  useEffect(()=>setEdits({}),[date,service]);
+  const valueFor=cat=>(cat in edits?edits[cat]:String(existing.get(cat)?.count??''));
+  const val=cat=>Number(valueFor(cat))||0;
+  const childrenTotal=val('Children Boys')+val('Children Girls');
+  const omegaTotal=val('Youth Boys')+val('Youth Girls');
+  const adultTotal=val('Adult Men')+val('Adult Women');
+  const total=childrenTotal+omegaTotal+adultTotal;
+  const saveAll=()=>{let n=0;HEADCOUNT_CATEGORIES.forEach(cat=>{if(!(cat in edits))return;const count=Number(edits[cat])||0;const rec=existing.get(cat);save('attendance_headcount',{id:rec?rec.id:uuid(),date,service,category:cat,count});n++;});setEdits({});alert(n?`Saved headcount for ${n} categor${n===1?'y':'ies'}. Total: ${total}.`:'No changes to save.');};
+  const history=[...new Set(data.attendance_headcount.map(r=>r.date+'|'+r.service))].sort().reverse().slice(0,10).map(k=>{const[d,s]=k.split('|');const rows=data.attendance_headcount.filter(r=>r.date===d&&r.service===s);const get=c=>rows.find(r=>r.category===c)?.count||0;return{date:d,service:s,children:get('Children Boys')+get('Children Girls'),omega:get('Youth Boys')+get('Youth Girls'),adults:get('Adult Men')+get('Adult Women'),total:rows.reduce((sum,r)=>sum+Number(r.count||0),0)};});
+  return <><div className="top"><h1>Headcount Attendance</h1><button className="primary" onClick={saveAll}>Save headcount</button></div>
+    <div className="panel"><div className="toolbar"><div className="fld"><small>Date</small><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}>{SERVICES.map(s=><option key={s}>{s}</option>)}</select></div></div>
+      <div className="cards"><div className="card"><div className="label">Adults</div><strong>{adultTotal}</strong></div><div className="card"><div className="label">Omega</div><strong>{omegaTotal}</strong></div><div className="card"><div className="label">Children</div><strong>{childrenTotal}</strong></div><div className="card"><div className="label">Total attendance</div><strong>{total}</strong></div></div>
+      <h2>Detailed breakdown</h2><div className="grid2">{HEADCOUNT_CATEGORIES.map(cat=><div className="fld" key={cat}><small>{headcountLabel(cat)}</small><input type="number" min="0" value={valueFor(cat)} onChange={e=>setEdits(ed=>({...ed,[cat]:e.target.value}))}/></div>)}</div>
+    </div>
+    <div className="panel"><h2>Recent headcount breakdowns</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Service</th><th>Adults</th><th>Omega</th><th>Children</th><th>Total</th></tr></thead><tbody>{history.map(r=><tr key={r.date+r.service}><td>{r.date}</td><td>{r.service}</td><td>{r.adults}</td><td>{r.omega}</td><td>{r.children}</td><td><b>{r.total}</b></td></tr>)}{!history.length&&<tr><td colSpan="6" className="empty">No headcounts recorded yet.</td></tr>}</tbody></table></div></div>
+  </>;
 }
 
 /* ---------------- Reports ---------------- */
@@ -1314,7 +1284,6 @@ export function Families() {
 
 export function Children() {
   const {data}=useData();
-  const families=(data.families||[]).map(f=>({value:f.id,label:f.family_name}));
   const members=data.members.map(m=>({value:m.id,label:m.name}));
   return <Crud
     table="children" title="Children" noun="child"
@@ -1325,7 +1294,6 @@ export function Children() {
       {key:'name',label:'Child name',required:true},
       {key:'dob',label:'Date of birth',type:'date'},
       {key:'gender',label:'Gender',type:'select',options:['Male','Female']},
-      {key:'family_id',label:'Family',type:'select',options:families},
       {key:'member_id',label:'Linked member/guardian',type:'select',options:members},
       {key:'guardian_name',label:'Guardian name'},
       {key:'guardian_phone',label:'Guardian phone',type:'tel'},
@@ -1336,11 +1304,23 @@ export function Children() {
     columns={[
       {label:'Child',render:c=><><b>{c.name}</b><br/><small>{c.dob||'DOB not recorded'}</small></>},
       {label:'Guardian',render:c=><>{c.guardian_name||'Not recorded'}<br/><small>{c.guardian_phone||''}</small></>},
-      {label:'Family',render:c=>families.find(f=>f.value===c.family_id)?.label||'Not assigned'},
       {label:'Status',render:c=>badge(c.status)},
     ]}
   />;
 }
+
+function GroupCheckIn({ group, title }) {
+  const { data, save } = useData();
+  const [q,setQ]=useState(''); const [service,setService]=useState('Sunday Service'); const [msg,setMsg]=useState('');
+  const isOmega=group==='Omega';
+  const members=(data.members||[]).filter(m=>m.status==='Active' && (isOmega ? /omega|youth/i.test(String(m.grp||'')) : !/omega|youth/i.test(String(m.grp||''))));
+  const results=q.trim()?members.filter(m=>`${m.name} ${m.phone||''} ${m.member_code||''}`.toLowerCase().includes(q.toLowerCase())).slice(0,30):members.slice(0,30);
+  function checkIn(m){const exists=data.attendance.find(a=>a.member_id===m.id&&a.date===today()&&a.service===service&&a.status==='Present');if(exists){setMsg(`${m.name} is already checked in.`);return;}save('attendance',{id:uuid(),date:today(),service,person_name:m.name,member_id:m.id,status:'Present',note:`${group} check-in`});setMsg(`${m.name} checked in successfully.`);setQ('');}
+  return <><div className="top"><div><h1>{title}</h1><div className="muted">Fast attendance check-in for {group}.</div></div></div><div className="panel"><div className="toolbar"><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}>{SERVICES.map(s=><option key={s}>{s}</option>)}</select></div><input placeholder="Search name, phone or member ID" value={q} onChange={e=>setQ(e.target.value)}/></div>{msg&&<p className="muted">{msg}</p>}<div className="quicklist">{results.map(m=><button key={m.id} className="quickrow" onClick={()=>checkIn(m)}><span><b>{m.name}</b><br/><small>{m.member_code||m.phone||''}</small></span><span className="badge">Check in</span></button>)}{!results.length&&<div className="empty">No {group.toLowerCase()} members found.</div>}</div></div></>;
+}
+
+export function AdultCheckIn(){ return <GroupCheckIn group="Adults" title="Adults Check-in"/>; }
+export function OmegaCheckIn(){ return <GroupCheckIn group="Omega" title="Omega (Youth) Check-in"/>; }
 
 export function ChildCheckIn() {
   const {data,save}=useData();

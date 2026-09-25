@@ -3,11 +3,11 @@ import { configured } from './supabase';
 import { AuthProvider, useAuth, can } from './auth';
 import { DataProvider, useData } from './data';
 import {
-  Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Giving, Offerings, EventAttendance, ServiceTimer,
-  FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareMembers, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, Families, Children, ChildCheckIn, MemberCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter,
+  Dashboard, Members, Attendance, QuickAttendance, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
+  FirstFruit, MonthlyContribution, Departments, Events, Reports, Users, Settings, SendSMS,
+  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, Children, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter,
 } from './pages';
-import { MemberCards, DepartmentDashboard, EventRegistration } from './operational';
+import { DepartmentDashboard } from './operational';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
 
@@ -152,11 +152,12 @@ const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, null],
   ['memberportal', '🙋 My Church', MemberPortal, null],
   ['members', '👥 Members', Members, 'members'],
-  ['families', '🏠 Families', Families, 'families'],
   ['children', '🧒 Children', Children, 'children'],
-  ['childcheckin', '🛡 Children Check-in', ChildCheckIn, 'child_checkins'],
-  ['membercheckin', '📱 Member Check-in', MemberCheckIn, 'attendance'],
-  ['membercards', '🪪 Member ID Cards', MemberCards, 'members'],
+  { group: 'checkin', label: '🟢 Check-in', items: [
+    ['adultcheckin', 'Adults', AdultCheckIn, 'attendance'],
+    ['omegacheckin', 'Omega (Youth)', OmegaCheckIn, 'attendance'],
+    ['childcheckin', 'Children', ChildCheckIn, 'child_checkins'],
+  ] },
   ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors'],
   ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
   { group: 'ministry', label: '⛪ Ministry', items: [
@@ -174,23 +175,24 @@ const NAV = [
   ] },
   { group: 'events', label: '📅 Events', items: [
     ['events', 'Events', Events, 'events'],
-    ['eventregistration', 'Event Registration', EventRegistration, 'events'],
     ['eventattendance', 'Event Attendance', EventAttendance, 'attendance'],
   ] },
   { group: 'finance', label: '💰 Finance', items: [
-    ['giving', 'Giving', Giving, 'giving'],
     ['offerings', 'Offerings', Offerings, 'offering_entries'],
-    ['firstfruit', 'First Fruit / Contributions', FirstFruit, 'member_contributions'],
+    ['firstfruit', 'First Fruit', FirstFruit, 'member_contributions'],
+    ['monthlycontribution', 'Monthly Contributions', MonthlyContribution, 'member_contributions'],
     ['membergiving', 'Digital Receipts', MemberGiving, 'payment_receipts'],
     ['mobilemoney', 'Mobile Money Payments', MobileMoneyPayments, 'payment_requests'],
     ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'finance_reconciliations'],
   ] },
   { group: 'welfare', label: '🤝 Welfare', items: [
-    ['welfaremembers', 'Welfare Members', WelfareMembers, 'welfare_members'],
     ['welfaredues', 'Welfare Dues', WelfareDues, 'member_contributions'],
     ['welfarefund', 'Welfare Fund', WelfareFund, 'welfare_transactions'],
   ] },
-  ['servicetimer', '⏱ Service Countdown Timer', ServiceTimer, 'service_plans'],
+  { group: 'servicetimer', label: '⏱ Service Countdown', items: [
+    ['servicetimer', 'Timer Setup', ServiceTimer, 'service_plans'],
+    ['servicetimerlive', 'Live Countdown', ServiceTimerLive, 'service_plans'],
+  ] },
   ['communications', '📢 Communication Center', CommunicationCenter, 'announcements'],
   ['notifications', '📣 Notification Center', NotificationCenter, 'communication_queue'],
   ['deliverycenter', '🚚 Delivery Center', DeliveryCenter, 'communication_queue'],
