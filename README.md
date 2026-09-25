@@ -56,3 +56,16 @@ npm run build
 Use the migrations that correspond to the modules you have already installed. For a clean installation, apply the base schema and the required numbered migrations in order.
 
 Do not place provider secret keys in the React `.env` file. Payment and messaging provider secrets belong in Supabase Edge Function secrets.
+
+## Single-Church Fine-Tuning
+This edition is tailored for a single church with three check-in groups: Adults, Omega (Youth), and Children.
+- Upcoming dashboard events show date and time.
+- Families and member ID card navigation removed.
+- Check-in is one expandable menu with Adults, Omega, and Children.
+- Headcount shows Adults, Omega, Children, and detailed gender breakdowns.
+- Event registration removed from the main app and member self-service.
+- Finance navigation uses Offerings instead of a separate Giving tab.
+- First Fruit is separate from Monthly Contributions.
+- Monthly Contributions use the main church member database.
+- Welfare dues use the main church member database instead of a separate Welfare Members register.
+- Service Countdown has separate Timer Setup and Live Countdown screens. Live Countdown is designed as a projection-friendly full-screen view.
