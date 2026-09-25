@@ -96,9 +96,18 @@ export default function Crud({
       out[f.key] = v;
     }
     if (Object.keys(errors).length) { setForm({ ...form, errors }); return; }
+    // Client-side uniqueness check for fields explicitly marked as unique.
+    // This gives a clear prompt before the record is queued for Supabase.
+    for (const f of fields) {
+      if (!f.unique || out[f.key] == null || out[f.key] === '') continue;
+      const duplicate = data[table].some((row) => row.id !== form.original?.id && String(row[f.key] ?? '').trim().toLowerCase() === String(out[f.key]).trim().toLowerCase());
+      if (duplicate) {
+        setForm({ ...form, errors: { ...form.errors, [f.key]: `${f.label} already exists. Please enter a different value.` } });
+        return;
+      }
+    }
     const recordId = form.original?.id || uuid();
-    const extra = table === 'members' && !form.original?.member_code ? { member_code: 'M-' + recordId.replaceAll('-', '').slice(0, 8).toUpperCase() } : {};
-    save(table, { ...(form.original || {}), ...out, ...extra, id: recordId });
+    save(table, { ...(form.original || {}), ...out, id: recordId });
     setForm(null);
   };
 

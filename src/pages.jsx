@@ -61,7 +61,7 @@ export function Dashboard() {
 }
 
 /* ---------------- Modules (all use the generic Crud component) ---------------- */
-const MEMBER_CSV_FIELDS = ['name', 'phone', 'email', 'dob', 'gender', 'grp', 'status', 'address', 'notes'];
+const MEMBER_CSV_FIELDS = ['member_code', 'name', 'phone', 'email', 'dob', 'gender', 'member_type', 'grp', 'status', 'address', 'notes'];
 
 function MemberImport() {
   const { data, save } = useData();
@@ -89,15 +89,21 @@ function MemberImport() {
         if (!name) { skipped++; continue; }
         const match = byName.get(name.toLowerCase());
         const status = r.status || match?.status || 'Active';
+        const memberCode = (r.member_code || match?.member_code || '').trim();
+        const memberType = ['Adult','Omega','Child'].includes(r.member_type) ? r.member_type : (match?.member_type || 'Adult');
+        if (!memberCode) { skipped++; continue; }
+        const duplicate = data.members.find(m => String(m.member_code || '').trim().toLowerCase() === memberCode.toLowerCase() && m.id !== match?.id);
+        if (duplicate) { skipped++; continue; }
         const importId = match ? match.id : uuid();
         save('members', {
           id: importId,
-          member_code: match?.member_code || ('M-' + importId.replaceAll('-', '').slice(0, 8).toUpperCase()),
+          member_code: memberCode,
           name,
           phone: r.phone || match?.phone || '',
           email: r.email || match?.email || '',
           dob: r.dob || match?.dob || null,
           gender: r.gender || match?.gender || null,
+          member_type: memberType,
           grp: r.grp || r.group || match?.grp || '',
           status: STATUS.includes(status) ? status : 'Active',
           address: r.address || match?.address || '',
@@ -141,13 +147,15 @@ export function Members() {
       table="members" title="Members" noun="member"
       sortKey="name" searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
       filters={[{ key: 'status', label: 'All statuses', options: STATUS }]}
-      defaults={{ status: 'Active' }}
+      defaults={{ status: 'Active', member_type: 'Adult' }}
       fields={[
+        { key: 'member_code', label: 'Unique Member ID', required: true, unique: true },
         { key: 'name', label: 'Name', required: true },
         { key: 'phone', label: 'Phone', type: 'tel' },
         { key: 'email', label: 'Email', type: 'email' },
         { key: 'dob', label: 'Date of birth', type: 'date' },
         { key: 'gender', label: 'Gender', type: 'select', options: ['Male', 'Female'] },
+        { key: 'member_type', label: 'Church Group', type: 'select', options: ['Adult', 'Omega', 'Child'], required: true },
         { key: 'grp', label: 'Group / Cell' },
         { key: 'status', label: 'Status', type: 'select', options: STATUS, required: true },
         { key: 'address', label: 'Address' },
@@ -1348,44 +1356,59 @@ export function Families() {
 }
 
 export function Children() {
-  const {data}=useData();
+  const {data, save}=useData();
   const members=data.members.map(m=>({value:m.id,label:m.name}));
-  return <Crud
-    table="children" title="Children" noun="child"
-    sortKey="name" searchKeys={['name','guardian_name','guardian_phone']}
-    filters={[{key:'status',label:'All statuses',options:['Active','Inactive']}]}
-    defaults={{status:'Active'}}
-    fields={[
-      {key:'name',label:'Child name',required:true},
-      {key:'dob',label:'Date of birth',type:'date'},
-      {key:'gender',label:'Gender',type:'select',options:['Male','Female']},
-      {key:'member_id',label:'Linked member/guardian',type:'select',options:members},
-      {key:'guardian_name',label:'Guardian name'},
-      {key:'guardian_phone',label:'Guardian phone',type:'tel'},
-      {key:'pickup_notes',label:'Pickup notes',type:'textarea',full:true},
-      {key:'medical_notes',label:'Medical notes',type:'textarea',full:true},
-      {key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true},
-    ]}
-    columns={[
-      {label:'Child',render:c=><><b>{c.name}</b><br/><small>{c.dob||'DOB not recorded'}</small></>},
-      {label:'Guardian',render:c=><>{c.guardian_name||'Not recorded'}<br/><small>{c.guardian_phone||''}</small></>},
-      {label:'Status',render:c=>badge(c.status)},
-    ]}
-  />;
+  const [q,setQ]=useState('');
+  const [service,setService]=useState("Children's Service");
+  const [msg,setMsg]=useState('');
+  const active=(data.children||[]).filter(c=>c.status==='Active');
+  const results=q.trim()?active.filter(c=>`${c.name} ${c.guardian_name||''} ${c.guardian_phone||''}`.toLowerCase().includes(q.toLowerCase())).slice(0,30):active.slice(0,30);
+  const checked=new Set((data.attendance||[]).filter(a=>a.date===today() && a.service===service && a.status==='Present' && a.child_id).map(a=>a.child_id));
+  function checkIn(c){
+    if(checked.has(c.id)){setMsg(`${c.name} is already marked present for ${service}.`);return;}
+    save('attendance',{id:uuid(),date:today(),service,person_name:c.name,child_id:c.id,status:'Present',note:'Children Department quick attendance'});
+    setMsg(`${c.name} marked present.`);
+  }
+  return <>
+    <Crud
+      table="children" title="Children" noun="child"
+      sortKey="name" searchKeys={['name','guardian_name','guardian_phone']}
+      filters={[{key:'status',label:'All statuses',options:['Active','Inactive']}]}
+      defaults={{status:'Active'}}
+      fields={[
+        {key:'name',label:'Child name',required:true},
+        {key:'dob',label:'Date of birth',type:'date'},
+        {key:'gender',label:'Gender',type:'select',options:['Male','Female']},
+        {key:'member_id',label:'Linked member/guardian',type:'select',options:members},
+        {key:'guardian_name',label:'Guardian name'},
+        {key:'guardian_phone',label:'Guardian phone',type:'tel'},
+        {key:'pickup_notes',label:'Pickup notes',type:'textarea',full:true},
+        {key:'medical_notes',label:'Medical notes',type:'textarea',full:true},
+        {key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true},
+      ]}
+      columns={[
+        {label:'Child',render:c=><><b>{c.name}</b><br/><small>{c.dob||'DOB not recorded'}</small></>},
+        {label:'Guardian',render:c=><>{c.guardian_name||'Not recorded'}<br/><small>{c.guardian_phone||''}</small></>},
+        {label:'Status',render:c=>badge(c.status)},
+      ]}
+    />
+    <div className="panel" style={{marginTop:16}}>
+      <div className="top" style={{marginBottom:10}}><div><h2 style={{margin:0}}>Children Quick Attendance</h2><div className="muted">The Children Department can record its attendance separately from the adult service.</div></div></div>
+      <div className="toolbar">
+        <div className="fld"><small>Children service</small><select value={service} onChange={e=>setService(e.target.value)}><option>Children's Service</option><option>Sunday School</option><option>Children's Special Program</option></select></div>
+        <input placeholder="Search child or guardian" value={q} onChange={e=>setQ(e.target.value)} />
+      </div>
+      {msg&&<p className="muted">{msg}</p>}
+      <div className="quicklist">
+        {results.map(c=><button key={c.id} className="quickrow" onClick={()=>checkIn(c)} disabled={checked.has(c.id)}>
+          <span><b>{c.name}</b><br/><small>{c.gender||''}{c.guardian_name?` · ${c.guardian_name}`:''}</small></span>
+          <span className="badge">{checked.has(c.id)?'Present':'Check in'}</span>
+        </button>)}
+        {!results.length&&<div className="empty">No active children found.</div>}
+      </div>
+    </div>
+  </>;
 }
-
-function GroupCheckIn({ group, title }) {
-  const { data, save } = useData();
-  const [q,setQ]=useState(''); const [service,setService]=useState('Sunday Service'); const [msg,setMsg]=useState('');
-  const isOmega=group==='Omega';
-  const members=(data.members||[]).filter(m=>m.status==='Active' && (isOmega ? /omega|youth/i.test(String(m.grp||'')) : !/omega|youth/i.test(String(m.grp||''))));
-  const results=q.trim()?members.filter(m=>`${m.name} ${m.phone||''} ${m.member_code||''}`.toLowerCase().includes(q.toLowerCase())).slice(0,30):members.slice(0,30);
-  function checkIn(m){const exists=data.attendance.find(a=>a.member_id===m.id&&a.date===today()&&a.service===service&&a.status==='Present');if(exists){setMsg(`${m.name} is already checked in.`);return;}save('attendance',{id:uuid(),date:today(),service,person_name:m.name,member_id:m.id,status:'Present',note:`${group} check-in`});setMsg(`${m.name} checked in successfully.`);setQ('');}
-  return <><div className="top"><div><h1>{title}</h1><div className="muted">Fast attendance check-in for {group}.</div></div></div><div className="panel"><div className="toolbar"><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}>{SERVICES.map(s=><option key={s}>{s}</option>)}</select></div><input placeholder="Search name, phone or member ID" value={q} onChange={e=>setQ(e.target.value)}/></div>{msg&&<p className="muted">{msg}</p>}<div className="quicklist">{results.map(m=><button key={m.id} className="quickrow" onClick={()=>checkIn(m)}><span><b>{m.name}</b><br/><small>{m.member_code||m.phone||''}</small></span><span className="badge">Check in</span></button>)}{!results.length&&<div className="empty">No {group.toLowerCase()} members found.</div>}</div></div></>;
-}
-
-export function AdultCheckIn(){ return <GroupCheckIn group="Adults" title="Adults Check-in"/>; }
-export function OmegaCheckIn(){ return <GroupCheckIn group="Omega" title="Omega (Youth) Check-in"/>; }
 
 export function ChildCheckIn() {
   const {data,save}=useData();
@@ -1423,13 +1446,14 @@ export function ChildCheckIn() {
   </>;
 }
 
-export function MemberCheckIn() {
+export function MemberCheckIn({ memberType = '', title = 'Member Check-in' } = {}) {
   const {data,save}=useData();
   const [code,setCode]=useState('');
   const [service,setService]=useState('Sunday Service');
   const [msg,setMsg]=useState('');
   const [recent,setRecent]=useState([]);
-  const memberMap=useMemo(()=>new Map(data.members.filter(m=>m.member_code).map(m=>[String(m.member_code).toUpperCase(),m])),[data.members]);
+  const eligibleMembers = useMemo(() => data.members.filter(m => m.member_code && (!memberType || (m.member_type || 'Adult') === memberType)), [data.members, memberType]);
+  const memberMap=useMemo(()=>new Map(eligibleMembers.map(m=>[String(m.member_code).toUpperCase(),m])),[eligibleMembers]);
   function submit(e){
     e.preventDefault();
     const key=code.trim().toUpperCase();
@@ -1442,11 +1466,14 @@ export function MemberCheckIn() {
     setMsg(`Welcome, ${m.name}. Attendance recorded.`);setCode('');
   }
   return <>
-    <div className="top"><div><h1>Member QR / ID Check-in</h1><div className="muted">Use the member code printed on the church card. A future camera scanner can use the same code.</div></div></div>
-    <div className="panel" style={{maxWidth:700}}><form onSubmit={submit}><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}><option>Sunday Service</option><option>Midweek Service</option><option>Prayer Meeting</option><option>Special Program</option></select></div><div className="fld" style={{marginTop:14}}><small>Member code</small><input autoFocus value={code} onChange={e=>setCode(e.target.value)} placeholder="Example: M-1A2B3C4D" autoCapitalize="characters" /></div><button className="primary" style={{marginTop:12}}>Record attendance</button></form>{msg&&<p className="muted">{msg}</p>}</div>
+    <div className="top"><div><h1>{title}</h1><div className="muted">Enter the unique member ID to record attendance for this department.</div></div></div>
+    <div className="panel" style={{maxWidth:700}}><form onSubmit={submit}><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}><option>Sunday Service</option><option>Midweek Service</option><option>Prayer Meeting</option><option>Special Program</option></select></div><div className="fld" style={{marginTop:14}}><small>{memberType ? `${memberType} Member ID` : 'Member ID'}</small><input autoFocus value={code} onChange={e=>setCode(e.target.value)} placeholder="Example: M-1A2B3C4D" autoCapitalize="characters" /></div><button className="primary" style={{marginTop:12}}>Record attendance</button></form>{msg&&<p className="muted">{msg}</p>}</div>
     <div className="panel"><h2>Recent check-ins</h2>{recent.map((r,i)=><div className="listrow" key={i}><b>{r.name}</b><span className="muted"> · {r.code} · {r.time}</span></div>)}{!recent.length&&<p className="muted">No check-ins recorded in this browser session.</p>}</div>
   </>;
 }
+
+export function AdultCheckIn() { return <MemberCheckIn memberType="Adult" title="Adult Quick Attendance" />; }
+export function OmegaCheckIn() { return <MemberCheckIn memberType="Omega" title="Omega Quick Attendance" />; }
 
 /* ---------------- Major Modules V11 ---------------- */
 export function FinanceCenter() {
