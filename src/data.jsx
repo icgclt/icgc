@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 export const TABLES = [
   'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
   'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
-  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'notification_campaigns', 'notification_logs', 'payment_requests', 'payment_webhook_events', 'member_notification_preferences',
+  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'notification_campaigns', 'notification_logs', 'payment_requests', 'payment_webhook_events', 'member_notification_preferences', 'member_group_history', 'abc_class_attendance',
 ];
 
 // Financial records use sessionStorage rather than localStorage. This keeps sensitive giving/welfare

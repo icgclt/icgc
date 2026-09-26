@@ -3,10 +3,12 @@ import { useAuth, can } from './auth';
 import { useData } from './data';
 import { uuid } from './utils';
 
-function Field({ f, value, error, onChange, list }) {
+function Field({ f, value, error, onChange, list, members }) {
   const common = { id: 'f_' + f.key, value: value ?? '', onChange: (e) => onChange(e.target.value) };
   let input;
-  if (f.type === 'select') {
+  if (f.type === 'member') {
+    input = <select {...common}><option value="">Search/select member</option>{(members || []).filter(m => m.status !== 'Inactive').sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(m => <option key={m.id} value={m.id}>{m.member_code || 'No ID'} · {m.name}{m.phone ? ` · ${m.phone}` : ''}</option>)}</select>;
+  } else if (f.type === 'select') {
     input = (
       <select {...common}>
         {!f.required && <option value=""></option>}
@@ -57,9 +59,13 @@ export default function Crud({
 
   const rows = useMemo(() => {
     const s = q.trim().toLowerCase();
+    const memberMatches = s ? (data.members || []).filter(m => `${m.name || ''} ${m.member_code || ''} ${m.phone || ''}`.toLowerCase().includes(s)) : [];
+    const memberNames = new Set(memberMatches.map(m => String(m.name || '').trim().toLowerCase()));
+    const memberIds = new Set(memberMatches.map(m => m.id));
     let r = data[table].filter(
       (x) =>
-        (!s || searchKeys.some((k) => String(x[k] ?? '').toLowerCase().includes(s))) &&
+        (!s || searchKeys.some((k) => String(x[k] ?? '').toLowerCase().includes(s)) ||
+          (memberMatches.length > 0 && (memberIds.has(x.member_id) || searchKeys.some(k => ['person_name','member_name','requester','name','giver'].includes(k) && memberNames.has(String(x[k] || '').trim().toLowerCase()))))) &&
         filters.every((f) => !fv[f.key] || String(x[f.key] ?? '') === fv[f.key]),
     );
     if (sortKey) {
@@ -88,7 +94,11 @@ export default function Crud({
       const visible = !f.showIf || f.showIf(form.values);
       if (!visible) continue;
       let v = form.values[f.key];
-      if (typeof v === 'string' && f.type !== 'checkbox') v = v.trim();
+      if (typeof v === 'string' && f.type !== 'checkbox' && f.type !== 'member') v = v.trim();
+      if (f.type === 'member' && f.memberNameKey) {
+        const picked = (data.members || []).find(m => m.id === v);
+        if (picked) out[f.memberNameKey] = picked.name;
+      }
       if (v === '' && f.fallback) v = f.fallback;
       if (f.required && (v === '' || v == null)) errors[f.key] = 'Required';
       const isText = !f.type || f.type === 'text' || f.type === 'textarea';
@@ -196,6 +206,7 @@ export default function Crud({
                   value={form.values[f.key]}
                   error={form.errors[f.key]}
                   list={suggest[f.key]}
+                  members={data.members}
                   onChange={(v) => setForm({ ...form, values: { ...form.values, [f.key]: v }, errors: { ...form.errors, [f.key]: undefined } })}
                 />
               ))}

@@ -1,6 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { supabase } from './supabase';
 
+
+function normalizePhone(value) {
+  const raw = String(value || '').trim().replace(/[\s()-]/g, '');
+  if (raw.startsWith('+')) return raw;
+  if (raw.startsWith('233')) return '+' + raw;
+  if (raw.startsWith('0')) return '+233' + raw.slice(1);
+  return raw;
+}
+
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
 
@@ -84,7 +93,7 @@ export function AuthProvider({ children }) {
     role: profile?.role,
     loading,
     recovery,
-    signIn: (email, password) => supabase.auth.signInWithPassword({ email, password }),
+    signIn: (identifier, password) => { const v=String(identifier||'').trim(); return v.includes('@') ? supabase.auth.signInWithPassword({ email:v, password }) : supabase.auth.signInWithPassword({ phone:normalizePhone(v), password }); },
     signUp: (email, password, fullName) =>
       supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } }),
     signOut: () => supabase.auth.signOut(),

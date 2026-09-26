@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
   FirstFruit, Departments, Events, Reports, Users, Settings, SendSMS,
-  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup,
+  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AutomationCenter, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup,
 } from './pages';
 import { DepartmentDashboard } from './operational';
 
@@ -86,7 +86,7 @@ function Login() {
         <h1>⛪ {CHURCH}</h1>
         <p className="muted">{mode === 'in' ? 'Sign in to continue.' : mode === 'forgot' ? 'Enter your email and we will send you a link to reset your password.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
         {mode === 'up' && <><label>Full name</label><input value={f.name} onChange={set('name')} required /></>}
-        <label>Email</label><input type="email" value={f.email} onChange={set('email')} required autoComplete="email" />
+        <label>Email or phone number</label><input type="text" value={f.email} onChange={set('email')} required autoComplete="username" placeholder="Email or 0241234567" />
         {mode !== 'forgot' && <><label>Password</label><input type="password" value={f.password} onChange={set('password')} required autoComplete={mode === 'in' ? 'current-password' : 'new-password'} /></>}
         {msg && <div className="err" style={{ marginBottom: 12 }}>{msg}</div>}
         <button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : mode === 'forgot' ? 'Send reset link' : 'Create account'}</button>
@@ -159,6 +159,7 @@ const NAV = [
   ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
   { group: 'ministry', label: '⛪ Ministry', items: [
     ['groups', 'Groups / House Fellowships', Groups, 'groups'],
+    ['abcclass', 'ABC Class', ABCClass, 'groups'],
     ['prayer', 'Prayer Requests', PrayerRequests, 'prayer_requests'],
     ['departments', 'Departments', Departments, 'departments'],
     ['deptdashboard', 'Department Dashboard', DepartmentDashboard, 'departments'],

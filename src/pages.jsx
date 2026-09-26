@@ -89,9 +89,8 @@ function MemberImport() {
         if (!name) { skipped++; continue; }
         const match = byName.get(name.toLowerCase());
         const status = r.status || match?.status || 'Active';
-        const memberCode = (r.member_code || match?.member_code || '').trim();
         const memberType = ['Adult','Omega','Child'].includes(r.member_type) ? r.member_type : (match?.member_type || 'Adult');
-        if (!memberCode) { skipped++; continue; }
+        const memberCode = (match?.member_code || nextMemberCode(data.members, memberType, data.member_group_history)).trim();
         const duplicate = data.members.find(m => String(m.member_code || '').trim().toLowerCase() === memberCode.toLowerCase() && m.id !== match?.id);
         if (duplicate) { skipped++; continue; }
         const importId = match ? match.id : uuid();
@@ -132,7 +131,7 @@ function MemberImport() {
         }
         match ? updated++ : added++;
       }
-      setMsg({ ok: true, text: `Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped (missing name)` : ''}.` });
+      setMsg({ ok: true, text: `Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped.` : ''}.` });
     } catch (err) {
       setMsg({ ok: false, text: 'Could not read that file. Make sure it is a plain CSV export.' });
     } finally {
@@ -160,16 +159,42 @@ function MemberImport() {
   );
 }
 
-function nextMemberCode(members, memberType) {
+function nextMemberCode(members, memberType, history = []) {
   const prefix = memberType === 'Child' ? 'TTC' : memberType === 'Omega' ? 'TTO' : 'TTA';
-  const used = new Set((members || []).map(m => String(m.member_code || '').trim().toUpperCase()).filter(Boolean));
-  let n = 1;
-  while (used.has(prefix + n)) n += 1;
-  return prefix + n;
+  let max = 0;
+  const codes = [...(members || []).map(m => m.member_code), ...(history || []).flatMap(h => [h.from_member_code, h.to_member_code])];
+  codes.forEach((rawCode) => {
+    const code = String(m.member_code || '').trim().toUpperCase();
+    const match = code.match(new RegExp('^' + prefix + '(\\d+)$'));
+    if (match) max = Math.max(max, Number(match[1]) || 0);
+  });
+  return prefix + (max + 1);
+}
+
+function PortalAccountLauncher({ members, onCreate }) {
+  const [q, setQ] = useState('');
+  const matches = (members || []).filter(m => m.status !== 'Inactive' && (!q.trim() || `${m.name} ${m.member_code || ''} ${m.phone || ''}`.toLowerCase().includes(q.trim().toLowerCase()))).slice(0, 12);
+  const [selected, setSelected] = useState('');
+  const member = members.find(m => m.id === selected);
+  return <div className="toolbar">
+    <input placeholder="Search member by name, ID or phone…" value={q} onChange={e=>{setQ(e.target.value);setSelected('')}} />
+    <select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">Select member</option>{matches.map(m=><option key={m.id} value={m.id}>{m.member_code || 'No ID'} · {m.name}{m.phone ? ` · ${m.phone}` : ''}</option>)}</select>
+    <button className="primary" disabled={!member || !member.phone} onClick={()=>onCreate(member)}>Create / Reset Portal Password</button>
+  </div>;
 }
 
 export function Members() {
   const { data, save } = useData();
+
+  async function createPortalAccount(member) {
+    if (!member?.id) return;
+    if (!member.phone) return alert('Add a phone number to this member first.');
+    const { data: result, error } = await supabase.functions.invoke('create-member-portal-user', { body: { member_id: member.id } });
+    if (error) return alert(error.message || 'Could not create the member portal account.');
+    if (result?.error) return alert(result.error);
+    const msg = `Portal account created for ${member.name}\n\nPhone: ${result.phone}\nTemporary password: ${result.temporary_password}\n\nGive these details to the member. They should sign in and change the password immediately.`;
+    window.prompt('Member portal credentials — copy these now', msg);
+  }
 
   function syncChildFromMember(record, original) {
     const existingChild = (data.children || []).find(c => c.member_id === record.id);
@@ -196,16 +221,36 @@ export function Members() {
   return (
     <>
       <MemberImport />
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <h2>Member Portal Account</h2>
+        <p className="muted">Select a member below in the Members table and use <b>Create Portal Account</b> to generate a phone-based login and temporary password.</p>
+        <PortalAccountLauncher members={data.members} onCreate={createPortalAccount} />
+      </div>
       <Crud
         table="members" title="Members" noun="member"
         sortKey="name" searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
-        prepareRecord={(record, original) => ({ ...record, member_code: original?.member_code || record.member_code || nextMemberCode(data.members, record.member_type || 'Adult') })}
+        prepareRecord={(record, original) => {
+          const oldType = original?.member_type || 'Adult';
+          const newType = record.member_type || 'Adult';
+          const progressed = !!original && oldType !== newType;
+          const member_code = progressed ? nextMemberCode(data.members, newType, data.member_group_history) : (original?.member_code || record.member_code || nextMemberCode(data.members, newType, data.member_group_history));
+          return { ...record, member_code };
+        }}
         filters={[
           { key: 'status', label: 'All statuses', options: STATUS },
           { key: 'member_type', label: 'All church groups', options: ['Adult', 'Omega', 'Child'] },
         ]}
         defaults={{ status: 'Active', member_type: 'Adult' }}
-        onSaved={syncChildFromMember}
+        onSaved={async (record, original) => {
+          if (original?.member_type && original.member_type !== record.member_type) {
+            await supabase.from('member_group_history').insert({
+              id: uuid(), member_id: record.id, from_group: original.member_type, to_group: record.member_type,
+              from_member_code: original.member_code || null, to_member_code: record.member_code || null,
+              changed_at: new Date().toISOString(),
+            });
+          }
+          syncChildFromMember(record, original);
+        }}
         fields={[
           { key: 'member_code', label: 'Unique Member ID (automatic)', readOnly: true, unique: true, placeholder: 'Assigned automatically' },
           { key: 'name', label: 'Name', required: true },
@@ -1264,6 +1309,70 @@ export function Visitors() {
     columns={[{label:'Date',key:'visit_date'},{label:'Visitor',render:r=><><b>{r.name}</b><br/><small>{r.phone||'No phone'}</small></>},{label:'Visit type',key:'visit_type'},{label:'Status',render:r=>badge(r.status)},{label:'Source',key:'source'}]}/>
 }
 
+export function ABCClass() {
+  const { data, save, remove } = useData();
+  const { role } = useAuth();
+  const canWrite = ['admin','secretary'].includes(role);
+  const [q, setQ] = useState('');
+  const [date, setDate] = useState(today());
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [weeks, setWeeks] = useState(12);
+  const [setupMsg, setSetupMsg] = useState('');
+  const [selectedMember, setSelectedMember] = useState('');
+  const group = (data.groups || []).find(g => String(g.name).trim().toLowerCase() === 'abc class');
+  const participants = (data.group_members || []).filter(x => x.group_id === group?.id && x.status !== 'Inactive');
+  const participantIds = new Set(participants.map(x => x.member_id));
+  const members = (data.members || []).filter(m => m.status !== 'Inactive');
+  const search = q.trim().toLowerCase();
+  const matches = members.filter(m => !search || `${m.name} ${m.member_code || ''} ${m.phone || ''}`.toLowerCase().includes(search)).slice(0, 25);
+  const selectedDate = new Date(`${date}T00:00:00`);
+  const start = group?.start_date ? new Date(`${group.start_date}T00:00:00`) : null;
+  const weekNo = start && !Number.isNaN(selectedDate.getTime()) ? Math.floor((selectedDate - start) / 604800000) + 1 : 1;
+  const attendance = new Map((data.abc_class_attendance || []).filter(a => a.group_id === group?.id && a.date === date).map(a => [a.member_id, a]));
+  const completed = group?.status === 'Completed' || (group?.end_date && date > group.end_date);
+
+  async function saveSetup() {
+    if (!canWrite) return;
+    if (!startDate) return setSetupMsg('Select the class start date.');
+    let calculatedEnd = endDate;
+    if (!calculatedEnd && Number(weeks) > 0) {
+      const d = new Date(`${startDate}T00:00:00`); d.setDate(d.getDate() + (Number(weeks) - 1) * 7); calculatedEnd = d.toISOString().slice(0,10);
+    }
+    save('groups', { id: group?.id || uuid(), ...(group || {}), name: 'ABC Class', group_type: 'Bible Study Class', meeting_day: 'Sunday', start_date: startDate, end_date: calculatedEnd || null, number_of_weeks: Number(weeks) || null, status: 'Active' });
+    setSetupMsg(`ABC Class saved. It runs for ${weeks} week(s), ending ${calculatedEnd || 'when completed'}.`);
+  }
+  function registerMember() {
+    if (!canWrite || !group || !selectedMember) return;
+    if (participantIds.has(selectedMember)) return;
+    const m = members.find(x => x.id === selectedMember);
+    if (!m) return;
+    save('group_members', { id: uuid(), group_id: group.id, member_id: m.id, role_name: 'Participant', status: 'Active' });
+    setSelectedMember('');
+  }
+  function toggleAttendance(memberId) {
+    if (!canWrite || !group || completed) return;
+    const rec = attendance.get(memberId);
+    save('abc_class_attendance', { id: rec?.id || uuid(), group_id: group.id, member_id: memberId, date, week_no: weekNo, present: !rec?.present });
+  }
+  function completeClass() {
+    if (!canWrite || !group) return;
+    save('groups', { ...group, status: 'Completed' });
+    setSetupMsg('ABC Class has been marked Completed. Its register and attendance history are retained.');
+  }
+  return <>
+    <div className="top"><div><h1>ABC Class</h1><div className="muted">Temporary Sunday Bible Study class. Register selected members, record weekly attendance, and retain the completed class history.</div></div></div>
+    <div className="panel"><h2>Class setup</h2><div className="formgrid">
+      <div><label>Start date</label><input type="date" value={startDate || group?.start_date || ''} onChange={e=>setStartDate(e.target.value)} /></div>
+      <div><label>End date</label><input type="date" value={endDate || group?.end_date || ''} onChange={e=>setEndDate(e.target.value)} /></div>
+      <div><label>Number of weeks</label><input type="number" min="1" value={weeks || group?.number_of_weeks || 1} onChange={e=>setWeeks(Number(e.target.value)||1)} /></div>
+      <div><label>Meeting</label><input value="Every Sunday" readOnly /></div>
+    </div><div className="toolbar"><button className="primary" onClick={saveSetup} disabled={!canWrite}>Save ABC Class Setup</button>{group?.status === 'Active' && <button className="danger" onClick={completeClass} disabled={!canWrite}>Mark Class Completed</button>}{setupMsg&&<span className="muted">{setupMsg}</span>}</div></div>
+    <div className="panel"><h2>Class Register</h2><div className="toolbar"><input placeholder="Search member by name or ID…" value={q} onChange={e=>setQ(e.target.value)} /><select value={selectedMember} onChange={e=>setSelectedMember(e.target.value)}><option value="">Select member</option>{matches.map(m=><option key={m.id} value={m.id}>{m.member_code} · {m.name}</option>)}</select><button className="primary" onClick={registerMember} disabled={!canWrite || !group || !selectedMember || participantIds.has(selectedMember)}>Add to ABC Class</button></div><div className="tablewrap"><table><thead><tr><th>Member ID</th><th>Name</th><th>Group</th><th>Action</th></tr></thead><tbody>{participants.map(p=>{const m=members.find(x=>x.id===p.member_id);return <tr key={p.id}><td>{m?.member_code||''}</td><td>{m?.name||'Unknown'}</td><td>{m?.member_type||'Adult'}</td><td>{canWrite&&<button className="danger sm" onClick={()=>remove('group_members',p.id)}>Remove</button>}</td></tr>})}{!participants.length&&<tr><td colSpan="4" className="empty">No members registered for this ABC Class yet.</td></tr>}</tbody></table></div></div>
+    <div className="panel"><h2>Weekly Attendance Register</h2><div className="toolbar"><div className="fld"><small>Sunday</small><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><span className="badge">Week {weekNo}{completed ? ' · Completed' : ''}</span></div><div className="tablewrap"><table><thead><tr><th>Member ID</th><th>Member</th><th>Present</th></tr></thead><tbody>{participants.map(p=>{const m=members.find(x=>x.id===p.member_id);const a=attendance.get(p.member_id);return <tr key={p.id}><td>{m?.member_code||''}</td><td><b>{m?.name||'Unknown'}</b></td><td><button className={a?.present?'primary':'secondary'} onClick={()=>toggleAttendance(p.member_id)} disabled={!canWrite||completed}>{a?.present?'✓ Present':'Mark Present'}</button></td></tr>})}{!participants.length&&<tr><td colSpan="3" className="empty">Register members above first.</td></tr>}</tbody></table></div></div>
+  </>;
+}
+
 export function Groups() {
   return <Crud table="groups" title="Groups / House Fellowships" noun="group" sortKey="name" searchKeys={['name','leader','location']}
     filters={[{key:'status',label:'All statuses',options:['Active','Inactive']}]}
@@ -1277,13 +1386,13 @@ export function Groups() {
 }
 
 export function FollowUps() {
-  return <Crud table="follow_ups" title="Follow-up" noun="follow-up" sortKey="date" sortDir="desc" searchKeys={['person_name','phone','reason','assigned_to','outcome']}
+  return <Crud table="follow_ups" title="Follow-up" noun="follow-up" sortKey="date" sortDir="desc" searchKeys={['person_name','member_id','phone','reason','assigned_to','outcome']}
     filters={[{key:'status',label:'All statuses',options:['Open','In Progress','Completed','Closed']},{key:'category',label:'All categories',options:['Visitor','New Convert','Member','Youth','Family','Other']}]}
     defaults={{date:today(),status:'Open',category:'Member',method:'Phone'}}
     fields={[
-      {key:'date',label:'Date',type:'date',required:true},{key:'person_name',label:'Person',required:true},{key:'phone',label:'Phone',type:'tel'},
+      {key:'date',label:'Date',type:'date',required:true},{key:'member_id',label:'Member (search by name or ID)',type:'member',memberNameKey:'person_name',required:true},{key:'phone',label:'Phone',type:'tel'},
       {key:'category',label:'Category',type:'select',options:['Visitor','New Convert','Member','Youth','Family','Other'],required:true},{key:'reason',label:'Reason',required:true},
-      {key:'assigned_to',label:'Assigned to'},{key:'method',label:'Method',type:'select',options:['Phone','WhatsApp','Visit','SMS','In Person']},
+      {key:'assigned_to',label:'Assigned to'},{key:'method',label:'Method',type:'select',options:['Phone','Visit','SMS','In Person']},
       {key:'outcome',label:'Outcome',type:'textarea',full:true},{key:'next_action',label:'Next action'},{key:'next_date',label:'Next follow-up',type:'date'},
       {key:'status',label:'Status',type:'select',options:['Open','In Progress','Completed','Closed'],required:true},{key:'notes',label:'Notes',type:'textarea',full:true}
     ]}
@@ -1291,11 +1400,11 @@ export function FollowUps() {
 }
 
 export function PrayerRequests() {
-  return <Crud table="prayer_requests" title="Prayer Requests" noun="prayer request" sortKey="date" sortDir="desc" searchKeys={['requester','request','category','assigned_to']}
+  return <Crud table="prayer_requests" title="Prayer Requests" noun="prayer request" sortKey="date" sortDir="desc" searchKeys={['requester','member_id','request','category','assigned_to']}
     filters={[{key:'status',label:'All statuses',options:['New','Assigned','Praying','Answered','Closed']},{key:'category',label:'All categories',options:['General','Healing','Family','Finance','Work','Salvation','Thanksgiving','Other']}]}
     defaults={{date:today(),status:'New',category:'General',confidential:false}}
     fields={[
-      {key:'date',label:'Date',type:'date',required:true},{key:'requester',label:'Requester',required:true},{key:'phone',label:'Phone',type:'tel'},
+      {key:'date',label:'Date',type:'date',required:true},{key:'member_id',label:'Member (search by name or ID)',type:'member',memberNameKey:'requester',required:true},{key:'phone',label:'Phone',type:'tel'},
       {key:'category',label:'Category',type:'select',options:['General','Healing','Family','Finance','Work','Salvation','Thanksgiving','Other']},
       {key:'request',label:'Prayer request',type:'textarea',required:true,full:true},{key:'confidential',label:'Confidential',type:'checkbox'},
       {key:'assigned_to',label:'Assigned to'},{key:'status',label:'Status',type:'select',options:['New','Assigned','Praying','Answered','Closed'],required:true},
@@ -1318,11 +1427,11 @@ export function ServicePlans() {
 }
 
 export function PastoralCare() {
-  return <Crud table="pastoral_cases" title="Pastoral Care" noun="case" sortKey="opened_date" sortDir="desc" searchKeys={['person_name','category','assigned_to']}
-    filters={[{key:'status',label:'All statuses',options:['Open','In Progress','Resolved','Closed']},{key:'priority',label:'All priorities',options:['Low','Normal','High','Urgent']}]}
+  return <Crud table="pastoral_cases" title="Pastoral Care" noun="case" sortKey="opened_date" sortDir="desc" searchKeys={['person_name','member_id','category','assigned_to']}
+    filters={[{key:'status',label:'All statuses',options:['Open','In Progress','Resolved','Closed']},{key:'priority',label:'All priorities',options:['Low','Normal','High','Urgent']},{key:'category',label:'All categories',options:['Counselling','Prayer / Spiritual Support','Hospital / Illness','Bereavement','Marriage / Family','Financial / Welfare','Crisis / Emergency','New Member Follow-up','Other']}]}
     defaults={{opened_date:today(),status:'Open',priority:'Normal'}}
     fields={[
-      {key:'opened_date',label:'Opened date',type:'date',required:true},{key:'person_name',label:'Person',required:true},{key:'category',label:'Category',required:true},
+      {key:'opened_date',label:'Opened date',type:'date',required:true},{key:'member_id',label:'Member (search by name or ID)',type:'member',memberNameKey:'person_name',required:true},{key:'category',label:'Category',type:'select',options:['Counselling','Prayer / Spiritual Support','Hospital / Illness','Bereavement','Marriage / Family','Financial / Welfare','Crisis / Emergency','New Member Follow-up','Other'],required:true},
       {key:'assigned_to',label:'Assigned pastor / leader'},{key:'priority',label:'Priority',type:'select',options:['Low','Normal','High','Urgent'],required:true},
       {key:'status',label:'Status',type:'select',options:['Open','In Progress','Resolved','Closed'],required:true},{key:'next_follow_up',label:'Next follow-up',type:'date'},
       {key:'private_notes',label:'Confidential notes',type:'textarea',full:true}
@@ -1716,14 +1825,14 @@ export function EngagementAutomation() {
   const birthdayCount=data.members.filter(m=>m.dob && String(m.dob).slice(5)===today().slice(5)).length;
   const visitorCount=data.visitors.filter(v=>String(v.visit_date||'').slice(0,7)===today().slice(0,7)).length;
   return <>
-    <div className="top"><div><h1>Engagement Automation</h1><div className="muted">Prepare reusable messages and queue member follow-up. Sending requires a connected SMS, WhatsApp or email provider.</div></div></div>
+    <div className="top"><div><h1>Engagement Automation</h1><div className="muted">Prepare reusable messages and queue member follow-up. Sending requires a connected SMS or email provider.</div></div></div>
     <div className="cards"><div className="card"><div className="label">Birthdays today</div><div className="num">{birthdayCount}</div></div><div className="card"><div className="label">Visitors this month</div><div className="num">{visitorCount}</div></div><div className="card"><div className="label">Templates</div><div className="num">{templates.length}</div></div><div className="card"><div className="label">Queued messages</div><div className="num">{queue.filter(q=>q.status==='Queued').length}</div></div></div>
-    <Crud table="communication_templates" title="Message Templates" noun="template" sortKey="created_at" sortDir="desc" searchKeys={['name','body','audience']} filters={[{key:'channel',label:'All channels',options:['SMS','WhatsApp','Email','In-app']},{key:'audience',label:'All audiences',options:['All Members','Youth','Children','Men','Women','New Visitors','Birthdays']}]} defaults={{channel:'SMS',audience:'All Members',active:true}}
-      fields={[{key:'name',label:'Template name',required:true},{key:'channel',label:'Channel',type:'select',options:['SMS','WhatsApp','Email','In-app'],required:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','New Visitors','Birthdays'],required:true},{key:'subject',label:'Subject'},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'active',label:'Active',type:'checkbox'}]}
+    <Crud table="communication_templates" title="Message Templates" noun="template" sortKey="created_at" sortDir="desc" searchKeys={['name','body','audience']} filters={[{key:'channel',label:'All channels',options:['SMS','Email','In-app']},{key:'audience',label:'All audiences',options:['All Members','Youth','Children','Men','Women','New Visitors','Birthdays']}]} defaults={{channel:'SMS',audience:'All Members',active:true}}
+      fields={[{key:'name',label:'Template name',required:true},{key:'channel',label:'Channel',type:'select',options:['SMS','Email','In-app'],required:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','New Visitors','Birthdays'],required:true},{key:'subject',label:'Subject'},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'active',label:'Active',type:'checkbox'}]}
       columns={[{label:'Name',key:'name'},{label:'Channel',key:'channel'},{label:'Audience',key:'audience'},{label:'Active',render:t=>badge(t.active?'Active':'Off')}]}
     />
     <Crud table="communication_queue" title="Message Queue" noun="message" sortKey="scheduled_for" sortDir="asc" searchKeys={['member_name','phone','message','trigger_type']} filters={[{key:'status',label:'All statuses',options:['Queued','Processing','Sent','Delivered','Failed','Cancelled']},{key:'trigger_type',label:'All triggers',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder']}]} defaults={{channel:'SMS',status:'Queued',trigger_type:'Manual'}}
-      fields={[{key:'member_name',label:'Recipient name',required:true},{key:'phone',label:'Phone'},{key:'channel',label:'Channel',type:'select',options:['SMS','WhatsApp','Email','In-app'],required:true},{key:'trigger_type',label:'Trigger',type:'select',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder'],required:true},{key:'scheduled_for',label:'Scheduled for',type:'datetime-local'},{key:'status',label:'Status',type:'select',options:['Queued','Sent','Failed','Cancelled'],required:true},{key:'message',label:'Message',type:'textarea',required:true,full:true}]}
+      fields={[{key:'member_name',label:'Recipient name',required:true},{key:'phone',label:'Phone'},{key:'channel',label:'Channel',type:'select',options:['SMS','Email','In-app'],required:true},{key:'trigger_type',label:'Trigger',type:'select',options:['Manual','Birthday','New Visitor','Follow-up','Event Reminder'],required:true},{key:'scheduled_for',label:'Scheduled for',type:'datetime-local'},{key:'status',label:'Status',type:'select',options:['Queued','Sent','Failed','Cancelled'],required:true},{key:'message',label:'Message',type:'textarea',required:true,full:true}]}
       columns={[{label:'Recipient',key:'member_name'},{label:'Channel',key:'channel'},{label:'Trigger',key:'trigger_type'},{label:'Scheduled',key:'scheduled_for'},{label:'Status',render:q=>badge(q.status)}]}
     />
   </>;
@@ -1791,7 +1900,7 @@ export function AutomationCenter() {
   function queueVisitors(){let n=0;recentVisitors.forEach(v=>{const m={id:null,name:v.name,phone:v.phone};if(visitorTemplate&&enqueue(m,visitorTemplate,'New Visitor',personalize(visitorTemplate.body,m)))n++;});setRunMsg(`${n} visitor follow-up message${n===1?'':'s'} queued.`);}
   return <>
     <div className="top"><div><h1>Automation Center</h1><div className="muted">Prepare birthday and new-visitor messages without sending anything until a provider is connected.</div></div></div>
-    <div className="panel"><div className="toolbar"><div className="fld"><small>Channel</small><select value={channel} onChange={e=>setChannel(e.target.value)}><option>SMS</option><option>WhatsApp</option><option>Email</option><option>In-app</option></select></div><button className="primary" onClick={queueBirthdays} disabled={!birthdayTemplate}>Queue today's birthdays</button><button onClick={queueVisitors} disabled={!visitorTemplate}>Queue new visitor follow-up</button></div>{runMsg&&<p className="muted">{runMsg}</p>}<p className="muted sm">Templates use {'{{name}}'} and {'{{church}}'} placeholders. Queued messages stay in the Communication Queue until a connected provider sends them.</p></div>
+    <div className="panel"><div className="toolbar"><div className="fld"><small>Channel</small><select value={channel} onChange={e=>setChannel(e.target.value)}><option>SMS</option><option>Email</option><option>In-app</option></select></div><button className="primary" onClick={queueBirthdays} disabled={!birthdayTemplate}>Queue today's birthdays</button><button onClick={queueVisitors} disabled={!visitorTemplate}>Queue new visitor follow-up</button></div>{runMsg&&<p className="muted">{runMsg}</p>}<p className="muted sm">Templates use {'{{name}}'} and {'{{church}}'} placeholders. Queued messages stay in the Communication Queue until a connected provider sends them.</p></div>
     <div className="cards"><div className="card"><span className="label">Birthdays today</span><strong>{birthdays.length}</strong></div><div className="card"><span className="label">Visitors this month</span><strong>{recentVisitors.length}</strong></div><div className="card"><span className="label">Active templates</span><strong>{templates.length}</strong></div><div className="card"><span className="label">Queued</span><strong>{(data.communication_queue||[]).filter(q=>q.status==='Queued').length}</strong></div></div>
     <div className="grid2"><div className="panel"><h2>Today's birthdays</h2>{birthdays.length?birthdays.map(m=><div className="listrow" key={m.id}><b>{m.name}</b><span className="muted"> · {m.phone}</span></div>):<div className="empty">No birthdays with phone numbers today.</div>}</div><div className="panel"><h2>Recent visitors</h2>{recentVisitors.length?recentVisitors.slice(0,20).map(v=><div className="listrow" key={v.id}><b>{v.name}</b><span className="muted"> · {v.visit_date} · {v.phone}</span></div>):<div className="empty">No visitors with phone numbers this month.</div>}</div></div>
   </>;
@@ -1913,12 +2022,12 @@ export function DeliveryCenter() {
   };
   if (!allowed) return <div className="panel"><h2>Delivery Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   return <>
-    <div className="top"><div><h1>Delivery Center</h1><div className="muted">Send queued SMS and WhatsApp messages through the secure Supabase Edge Function.</div></div><button className="primary" onClick={process} disabled={busy}>{busy?'Processing…':'Process queue now'}</button></div>
+    <div className="top"><div><h1>Delivery Center</h1><div className="muted">Send queued SMS messages through the secure Supabase Edge Function.</div></div><button className="primary" onClick={process} disabled={busy}>{busy?'Processing…':'Process queue now'}</button></div>
     <div className="cards"><div className="card"><div className="label">Queued</div><div className="num">{queued.length}</div></div><div className="card"><div className="label">Sent</div><div className="num">{sent.length}</div></div><div className="card"><div className="label">Failed</div><div className="num">{failed.length}</div></div><div className="card"><div className="label">Total queue</div><div className="num">{queue.length}</div></div></div>
     {msg&&<div className="panel"><p className="muted">{msg}</p></div>}
-    <div className="panel"><h2>Provider setup</h2><p className="muted">SMS uses SMSOnlineGH. WhatsApp uses the Meta WhatsApp Cloud API. Keep all provider credentials in Supabase Edge Function secrets, never in Vite environment variables.</p><div className="tablewrap"><table><thead><tr><th>Channel</th><th>Secrets</th><th>Notes</th></tr></thead><tbody><tr><td>SMS</td><td><code>SMSONLINEGH_API_KEY</code><br/><code>SMSONLINEGH_SENDER_ID</code></td><td>Sender ID must be approved by your SMS provider.</td></tr><tr><td>WhatsApp</td><td><code>WHATSAPP_ACCESS_TOKEN</code><br/><code>WHATSAPP_PHONE_NUMBER_ID</code></td><td>Proactive WhatsApp messages normally require an approved template.</td></tr></tbody></table></div></div>
+    <div className="panel"><h2>Provider setup</h2><p className="muted">SMS uses SMSOnlineGH. Keep provider credentials in Supabase Edge Function secrets, never in Vite environment variables.</p><div className="tablewrap"><table><thead><tr><th>Channel</th><th>Secrets</th><th>Notes</th></tr></thead><tbody><tr><td>SMS</td><td><code>SMSONLINEGH_API_KEY</code><br/><code>SMSONLINEGH_SENDER_ID</code></td><td>Sender ID must be approved by your SMS provider.</td></tr></tbody></table></div></div>
     <div className="panel"><h2>Recent delivery queue</h2><div className="tablewrap"><table><thead><tr><th>Scheduled</th><th>Recipient</th><th>Channel</th><th>Trigger</th><th>Status</th><th>Error</th></tr></thead><tbody>{queue.slice(0,100).map(q=><tr key={q.id}><td>{String(q.scheduled_for||'').slice(0,16).replace('T',' ')}</td><td>{q.member_name||q.phone||q.email||''}</td><td>{q.channel}</td><td>{q.trigger_type||''}</td><td>{badge(q.status)}</td><td className="muted sm">{q.last_error||q.error_message||''}</td></tr>)}{!queue.length&&<tr><td colSpan="6" className="empty">No messages in the queue.</td></tr>}</tbody></table></div></div>
-    <div className="panel"><h2>Automatic processing</h2><p className="muted">After deploying <code>notification-worker</code>, create a Supabase Cron job to call it every minute. Supabase supports invoking Edge Functions from Cron jobs, so scheduled messages can be processed without leaving a browser open.</p><pre>{`supabase functions deploy notification-worker\nsupabase secrets set SMSONLINEGH_API_KEY=... SMSONLINEGH_SENDER_ID=... WHATSAPP_ACCESS_TOKEN=... WHATSAPP_PHONE_NUMBER_ID=... NOTIFICATION_CRON_SECRET=...`}</pre></div>
+    <div className="panel"><h2>Automatic processing</h2><p className="muted">After deploying <code>notification-worker</code>, create a Supabase Cron job to call it every minute. Supabase supports invoking Edge Functions from Cron jobs, so scheduled messages can be processed without leaving a browser open.</p><pre>{`supabase functions deploy notification-worker\nsupabase secrets set SMSONLINEGH_API_KEY=... SMSONLINEGH_SENDER_ID=... NOTIFICATION_CRON_SECRET=...`}</pre></div>
   </>;
 }
 
@@ -1932,8 +2041,6 @@ export function NotificationCenter() {
   const [title,setTitle] = useState('');
   const [message,setMessage] = useState('');
   const [schedule,setSchedule] = useState('');
-  const [waTemplate,setWaTemplate] = useState('');
-  const [waLanguage,setWaLanguage] = useState('en_US');
   const [status,setStatus] = useState('');
   if (!allowed.includes(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
 
@@ -1952,8 +2059,8 @@ export function NotificationCenter() {
     const campaignId=uuid();
     const now=new Date().toISOString();
     save('notification_campaigns',{id:campaignId,title:title.trim(),message:message.trim(),channel,audience,scheduled_for:schedule?new Date(schedule).toISOString():now,status:'Queued',recipient_count:targetMembers.length});
-    targetMembers.forEach(m=>save('communication_queue',{id:uuid(),member_id:m.id||null,member_name:m.name||m.full_name||'',phone:m.phone||'',email:m.email||'',channel,trigger_type:'Campaign',scheduled_for:schedule?new Date(schedule).toISOString():now,status:'Queued',message:message.trim(),campaign_id:campaignId,campaign_title:title.trim(),whatsapp_template_name:channel==='WhatsApp'?waTemplate.trim()||null:null,whatsapp_template_language:channel==='WhatsApp'?waLanguage.trim()||'en_US':'en_US'}));
-    setTitle(''); setMessage(''); setSchedule(''); setWaTemplate('');
+    targetMembers.forEach(m=>save('communication_queue',{id:uuid(),member_id:m.id||null,member_name:m.name||m.full_name||'',phone:m.phone||'',email:m.email||'',channel,trigger_type:'Campaign',scheduled_for:schedule?new Date(schedule).toISOString():now,status:'Queued',message:message.trim(),campaign_id:campaignId,campaign_title:title.trim()}));
+    setTitle(''); setMessage(''); setSchedule('');
     setStatus(`${targetMembers.length} recipient message${targetMembers.length===1?'':'s'} queued.`);
   };
 
@@ -1963,12 +2070,12 @@ export function NotificationCenter() {
     <div className="top"><div><h1>Notification Center</h1><div className="muted">Create church-wide or targeted messages and place them in the delivery queue.</div></div></div>
     <div className="cards"><div className="card"><span className="label">Active members</span><strong>{members.length}</strong></div><div className="card"><span className="label">Recipients now</span><strong>{targetMembers.length}</strong></div><div className="card"><span className="label">Queued messages</span><strong>{queued}</strong></div><div className="card"><span className="label">Campaigns</span><strong>{(data.notification_campaigns||[]).length}</strong></div></div>
     <div className="panel"><h2>Create notification</h2><div className="formgrid">
-      <div><label>Channel</label><select value={channel} onChange={e=>setChannel(e.target.value)}><option>In-app</option><option>SMS</option><option>WhatsApp</option><option>Email</option></select></div>
+      <div><label>Channel</label><select value={channel} onChange={e=>setChannel(e.target.value)}><option>In-app</option><option>SMS</option><option>Email</option></select></div>
       <div><label>Audience</label><select value={audience} onChange={e=>setAudience(e.target.value)}><option>All Members</option><option>Youth</option><option>Men</option><option>Women</option><option>New Visitors</option></select></div>
       <div className="full"><label>Title</label><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Sunday Service Reminder" /></div>
       <div className="full"><label>Message</label><textarea rows="5" value={message} onChange={e=>setMessage(e.target.value)} placeholder="Write the message to be sent..." /></div>
-      <div><label>Schedule (optional)</label><input type="datetime-local" value={schedule} onChange={e=>setSchedule(e.target.value)} /></div>{channel==='WhatsApp'&&<><div><label>WhatsApp template name (optional)</label><input value={waTemplate} onChange={e=>setWaTemplate(e.target.value)} placeholder="approved_template_name" /></div><div><label>Template language</label><input value={waLanguage} onChange={e=>setWaLanguage(e.target.value)} placeholder="en_US" /></div></>}
-    </div><div className="toolbar"><button className="primary" onClick={queueCampaign}>Queue notification</button><span className="muted">Recipients: {targetMembers.length}</span></div>{status&&<p className="muted">{status}</p>}<p className="muted sm">Messages are queued first. SMS, WhatsApp and email delivery require a connected provider before they are actually sent.</p></div>
+      <div><label>Schedule (optional)</label><input type="datetime-local" value={schedule} onChange={e=>setSchedule(e.target.value)} /></div>
+    </div><div className="toolbar"><button className="primary" onClick={queueCampaign}>Queue notification</button><span className="muted">Recipients: {targetMembers.length}</span></div>{status&&<p className="muted">{status}</p>}<p className="muted sm">Messages are queued first. SMS and other enabled delivery channels require a connected provider before they are actually sent.</p></div>
     <div className="panel"><h2>Recent campaigns</h2><div className="tablewrap"><table><thead><tr><th>Created</th><th>Title</th><th>Channel</th><th>Audience</th><th>Recipients</th><th>Status</th></tr></thead><tbody>{campaigns.map(c=><tr key={c.id}><td>{String(c.created_at||'').slice(0,16).replace('T',' ')}</td><td><b>{c.title}</b></td><td>{c.channel}</td><td>{c.audience}</td><td>{c.recipient_count||0}</td><td>{badge(c.status)}</td></tr>)}{!campaigns.length&&<tr><td colSpan="6" className="empty">No campaigns created yet.</td></tr>}</tbody></table></div></div>
   </>;
 }
