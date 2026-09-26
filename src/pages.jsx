@@ -162,14 +162,18 @@ function MemberImport() {
 function nextMemberCode(members, memberType, history = []) {
   const prefix = memberType === 'Child' ? 'TTC' : memberType === 'Omega' ? 'TTO' : 'TTA';
   let max = 0;
-  const codes = [...(members || []).map(m => m.member_code), ...(history || []).flatMap(h => [h.from_member_code, h.to_member_code])];
+  const codes = [
+    ...(members || []).map(m => m.member_code),
+    ...(history || []).flatMap(h => [h.from_member_code, h.to_member_code]),
+  ];
   codes.forEach((rawCode) => {
-    const code = String(m.member_code || '').trim().toUpperCase();
+    const code = String(rawCode || '').trim().toUpperCase();
     const match = code.match(new RegExp('^' + prefix + '(\\d+)$'));
     if (match) max = Math.max(max, Number(match[1]) || 0);
   });
   return prefix + (max + 1);
 }
+
 
 function PortalAccountLauncher({ members, onCreate }) {
   const [q, setQ] = useState('');

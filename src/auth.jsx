@@ -10,14 +10,6 @@ function normalizePhone(value) {
   return raw;
 }
 
-// Member portal accounts use a private synthetic email identity so the app can
-// authenticate with email/password without enabling Supabase's Phone provider
-// or requiring SMS/OTP. Members still log in using their registered phone number.
-function memberLoginEmail(value) {
-  const phone = normalizePhone(value);
-  return `member-${phone.replace(/\D/g, '')}@members.local`;
-}
-
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
 
@@ -101,12 +93,7 @@ export function AuthProvider({ children }) {
     role: profile?.role,
     loading,
     recovery,
-    signIn: (identifier, password) => {
-      const v = String(identifier || '').trim();
-      return v.includes('@')
-        ? supabase.auth.signInWithPassword({ email: v, password })
-        : supabase.auth.signInWithPassword({ email: memberLoginEmail(v), password });
-    },
+    signIn: (identifier, password) => { const v=String(identifier||'').trim(); return v.includes('@') ? supabase.auth.signInWithPassword({ email:v, password }) : supabase.auth.signInWithPassword({ phone:normalizePhone(v), password }); },
     signUp: (email, password, fullName) =>
       supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } }),
     signOut: () => supabase.auth.signOut(),
@@ -114,8 +101,11 @@ export function AuthProvider({ children }) {
     sendResetEmail: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
     // sets a new password for the signed-in user (recovery link or Settings > Change password)
     updatePassword: async (password) => {
-      const res = await supabase.auth.updateUser({ password });
-      if (!res.error) setRecovery(false);
+      const res = await supabase.auth.updateUser({ password, data: { must_change_password: false } });
+      if (!res.error) {
+        setRecovery(false);
+        if (res.data?.user) setSession((prev) => prev ? { ...prev, user: res.data.user } : prev);
+      }
       return res;
     },
     refreshProfile: () => loadProfile(session?.user),

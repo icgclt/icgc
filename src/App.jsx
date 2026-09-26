@@ -24,7 +24,7 @@ function Gate() {
   const { loading, user, profile, role, recovery } = useAuth();
   if (loading) return <div className="login"><div className="loginbox"><h1>{CHURCH}</h1><p className="muted">Loading…</p></div></div>;
   if (!user) return <Login />;
-  if (recovery) return <SetNewPassword />;
+  if (recovery || user?.user_metadata?.must_change_password === true) return <SetNewPassword forced={user?.user_metadata?.must_change_password === true} />;
   if (!profile || role === 'pending') return <Pending />;
   return (
     <DataProvider key={user.id} uid={user.id} role={role}>
@@ -63,7 +63,10 @@ function Login() {
     try {
       if (mode === 'in') {
         const { error } = await signIn(f.email.trim(), f.password);
-        if (error) setMsg(error.message);
+        if (error) {
+          const m = String(error.message || '');
+          setMsg(m.toLowerCase().includes('phone logins are disabled') ? 'Phone login is not enabled yet. In Supabase, open Authentication → Providers → Phone and enable the Phone provider, then try again.' : m);
+        }
       } else if (mode === 'forgot') {
         const { error } = await sendResetEmail(f.email.trim());
         setMsg(error ? error.message : 'If that email has an account, a reset link has been sent. Open it on this device.');
@@ -84,9 +87,9 @@ function Login() {
     <div className="login">
       <form className="loginbox" onSubmit={submit}>
         <h1>⛪ {CHURCH}</h1>
-        <p className="muted">{mode === 'in' ? 'Sign in to continue.' : mode === 'forgot' ? 'Enter your email address and we will send you a link to reset your password.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
+        <p className="muted">{mode === 'in' ? 'Members sign in with their phone number and system-generated password.' : mode === 'forgot' ? 'Enter your email and we will send you a link to reset your password. Member phone-password resets are handled by the church office.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
         {mode === 'up' && <><label>Full name</label><input value={f.name} onChange={set('name')} required /></>}
-        <label>{mode === 'forgot' ? 'Email address' : 'Email or phone number'}</label><input type="text" value={f.email} onChange={set('email')} required autoComplete="username" placeholder={mode === 'forgot' ? 'you@example.com' : 'Email or 0241234567'} />
+        <label>{mode === 'forgot' ? 'Email address' : 'Phone number or email'}</label><input type="text" value={f.email} onChange={set('email')} required autoComplete="username" placeholder={mode === 'forgot' ? 'name@example.com' : '0241234567 or name@example.com'} />
         {mode !== 'forgot' && <><label>Password</label><input type="password" value={f.password} onChange={set('password')} required autoComplete={mode === 'in' ? 'current-password' : 'new-password'} /></>}
         {msg && <div className="err" style={{ marginBottom: 12 }}>{msg}</div>}
         <button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : mode === 'forgot' ? 'Send reset link' : 'Create account'}</button>
@@ -101,7 +104,7 @@ function Login() {
   );
 }
 
-function SetNewPassword() {
+function SetNewPassword({ forced = false }) {
   const { updatePassword, signOut } = useAuth();
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
@@ -119,7 +122,8 @@ function SetNewPassword() {
   return (
     <div className="login">
       <form className="loginbox" onSubmit={submit}>
-        <h1>Set a new password</h1>
+        <h1>{forced ? 'Change your temporary password' : 'Set a new password'}</h1>
+        {forced && <p className="muted">This is your first login. For your security, change the temporary password before continuing.</p>}
         <label>New password</label><input type="password" value={p1} onChange={(e) => setP1(e.target.value)} required autoComplete="new-password" />
         <label>Confirm new password</label><input type="password" value={p2} onChange={(e) => setP2(e.target.value)} required autoComplete="new-password" />
         {msg && <div className="err" style={{ marginBottom: 12 }}>{msg}</div>}
