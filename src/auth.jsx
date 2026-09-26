@@ -2,12 +2,24 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { supabase } from './supabase';
 
 
-function normalizePhone(value) {
+export function normalizePhone(value) {
   const raw = String(value || '').trim().replace(/[\s()-]/g, '');
   if (raw.startsWith('+')) return raw;
   if (raw.startsWith('233')) return '+' + raw;
   if (raw.startsWith('0')) return '+233' + raw.slice(1);
   return raw;
+}
+
+// Supabase hosted projects may require an SMS provider to enable native Phone Auth.
+// This church portal intentionally uses the member's phone number as the login
+// credential while keeping Auth itself on the already-enabled Email provider.
+// The real phone number remains in the members table; this deterministic alias
+// is never shown to members.
+export function memberLoginEmail(value) {
+  const phone = normalizePhone(value);
+  const digits = phone.replace(/\D/g, '');
+  if (!/^233\d{9}$/.test(digits)) return '';
+  return `member-${digits}@members.icgctt.local`;
 }
 
 const Ctx = createContext(null);
@@ -93,7 +105,13 @@ export function AuthProvider({ children }) {
     role: profile?.role,
     loading,
     recovery,
-    signIn: (identifier, password) => { const v=String(identifier||'').trim(); return v.includes('@') ? supabase.auth.signInWithPassword({ email:v, password }) : supabase.auth.signInWithPassword({ phone:normalizePhone(v), password }); },
+    signIn: (identifier, password) => {
+      const v = String(identifier || '').trim();
+      if (v.includes('@')) return supabase.auth.signInWithPassword({ email: v, password });
+      const email = memberLoginEmail(v);
+      if (!email) return Promise.resolve({ data: { user: null, session: null }, error: { message: 'Enter a valid Ghanaian phone number, for example 0244457816.' } });
+      return supabase.auth.signInWithPassword({ email, password });
+    },
     signUp: (email, password, fullName) =>
       supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } }),
     signOut: () => supabase.auth.signOut(),

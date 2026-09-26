@@ -65,7 +65,7 @@ function Login() {
         const { error } = await signIn(f.email.trim(), f.password);
         if (error) {
           const m = String(error.message || '');
-          setMsg(m.toLowerCase().includes('phone logins are disabled') ? 'Phone login is not enabled yet. In Supabase, open Authentication → Providers → Phone and enable the Phone provider, then try again.' : m);
+          setMsg(m);
         }
       } else if (mode === 'forgot') {
         const { error } = await sendResetEmail(f.email.trim());
@@ -87,7 +87,7 @@ function Login() {
     <div className="login">
       <form className="loginbox" onSubmit={submit}>
         <h1>⛪ {CHURCH}</h1>
-        <p className="muted">{mode === 'in' ? 'Members sign in with their phone number and system-generated password.' : mode === 'forgot' ? 'Enter your email and we will send you a link to reset your password. Member phone-password resets are handled by the church office.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
+        <p className="muted">{mode === 'in' ? 'Members sign in with their phone number and system-generated password. No SMS or WhatsApp is required.' : mode === 'forgot' ? 'Enter your email and we will send you a link to reset your password. Member phone-password resets are handled by the church office.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
         {mode === 'up' && <><label>Full name</label><input value={f.name} onChange={set('name')} required /></>}
         <label>{mode === 'forgot' ? 'Email address' : 'Phone number or email'}</label><input type="text" value={f.email} onChange={set('email')} required autoComplete="username" placeholder={mode === 'forgot' ? 'name@example.com' : '0241234567 or name@example.com'} />
         {mode !== 'forgot' && <><label>Password</label><input type="password" value={f.password} onChange={set('password')} required autoComplete={mode === 'in' ? 'current-password' : 'new-password'} /></>}
