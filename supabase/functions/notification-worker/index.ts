@@ -5,9 +5,6 @@ const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const CRON_SECRET = Deno.env.get('NOTIFICATION_CRON_SECRET') || ''
 const SMS_KEY = Deno.env.get('SMSONLINEGH_API_KEY') || ''
 const SMS_SENDER = Deno.env.get('SMSONLINEGH_SENDER_ID') || ''
-const WA_TOKEN = Deno.env.get('WHATSAPP_ACCESS_TOKEN') || ''
-const WA_PHONE_ID = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') || ''
-const WA_GRAPH_VERSION = Deno.env.get('WHATSAPP_GRAPH_VERSION') || 'v23.0'
 const MAX_ATTEMPTS = 5
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE)
@@ -47,26 +44,9 @@ async function sendSms(row: any) {
   return { provider: 'SMSOnlineGH', reference: String(raw?.message_id || raw?.id || raw?.reference || ''), payload: raw }
 }
 
-async function sendWhatsApp(row: any) {
-  if (!WA_TOKEN || !WA_PHONE_ID) throw new Error('WhatsApp Cloud API is not configured.')
-  const to = normalizePhone(row.phone)
-  if (!/^233\d{9}$/.test(to)) throw new Error('Recipient phone number is not a valid Ghana number.')
-  const url = `https://graph.facebook.com/${WA_GRAPH_VERSION}/${WA_PHONE_ID}/messages`
-  let payload: any
-  if (row.whatsapp_template_name) {
-    payload = { messaging_product: 'whatsapp', to, type: 'template', template: { name: row.whatsapp_template_name, language: { code: row.whatsapp_template_language || 'en_US' } } }
-  } else {
-    payload = { messaging_product: 'whatsapp', to, type: 'text', text: { preview_url: false, body: String(row.message || '') } }
-  }
-  const response = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-  const raw = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(raw?.error?.message || `WhatsApp provider returned ${response.status}`)
-  return { provider: 'Meta WhatsApp', reference: String(raw?.messages?.[0]?.id || ''), payload: raw }
-}
-
 async function processRow(row: any) {
-  const result = row.channel === 'SMS' ? await sendSms(row) : row.channel === 'WhatsApp' ? await sendWhatsApp(row) : null
-  if (!result) throw new Error(`Channel ${row.channel} is not enabled by V17. Use SMS or WhatsApp.`)
+  const result = row.channel === 'SMS' ? await sendSms(row) : null
+  if (!result) throw new Error(`Channel ${row.channel} is not enabled. Use SMS.`)
   await admin.from('communication_queue').update({ status: 'Sent', provider: result.provider, provider_reference: result.reference || null, sent_at: new Date().toISOString(), last_error: null, provider_payload: result.payload, attempts: Number(row.attempts || 0) + 1 }).eq('id', row.id)
   await admin.from('notification_logs').insert({ id: crypto.randomUUID(), campaign_id: row.campaign_id || null, queue_id: row.id, member_id: row.member_id || null, channel: row.channel, destination: row.phone || row.email || null, status: 'Sent', provider: result.provider, provider_reference: result.reference || null, attempts: Number(row.attempts || 0) + 1, sent_at: new Date().toISOString(), provider_payload: result.payload })
   return { id: row.id, ok: true, provider: result.provider }
@@ -99,7 +79,7 @@ Deno.serve(async (req) => {
         const message = String((e as any)?.message || e)
         const nextMinutes = [1,5,15,30,60][Math.min(attempt, 4)]
         await admin.from('communication_queue').update({ status: attempt + 1 >= MAX_ATTEMPTS ? 'Failed' : 'Queued', last_error: message, next_attempt_at: new Date(Date.now() + nextMinutes * 60000).toISOString() }).eq('id', row.id)
-        await admin.from('notification_logs').insert({ id: crypto.randomUUID(), campaign_id: row.campaign_id || null, queue_id: row.id, member_id: row.member_id || null, channel: row.channel, destination: row.phone || row.email || null, status: 'Failed', provider: row.channel === 'SMS' ? 'SMSOnlineGH' : row.channel === 'WhatsApp' ? 'Meta WhatsApp' : null, error_message: message, attempts: attempt + 1 })
+        await admin.from('notification_logs').insert({ id: crypto.randomUUID(), campaign_id: row.campaign_id || null, queue_id: row.id, member_id: row.member_id || null, channel: row.channel, destination: row.phone || row.email || null, status: 'Failed', provider: row.channel === 'SMS' ? 'SMSOnlineGH' : null, error_message: message, attempts: attempt + 1 })
         results.push({ id: row.id, ok: false, error: message })
       }
     }

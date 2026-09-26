@@ -86,3 +86,20 @@ This edition is tailored for a single church with three check-in groups: Adults,
 - Children now have a Quick Attendance section directly on the Children page.
 - Children Department attendance is stored in `attendance.child_id`, separate from adult/member attendance.
 - Run `supabase/migration_25_member_ids_children_attendance.sql`.
+
+## V31 additions
+- Member portal accounts use the member's Ghana phone number plus a system-generated temporary password. Deploy `supabase/functions/create-member-portal-user` and enable Supabase Auth > Phone provider (phone/password). Staff can create/reset a member portal password from Members.
+- Member IDs are automatically generated: Adult `TTA1...`, Omega `TTO1...`, Child `TTC1...`. When a member changes group, a new group-specific ID is assigned and the old ID is retained in `member_group_history`; IDs are not reused.
+- ABC Class is a temporary Sunday Bible Study class under Ministry. It supports a fixed start/end period, selected-member register, weekly attendance, and completion history.
+- Pastoral Care categories are a dropdown including Other. Member selectors/searches use member name or ID.
+- WhatsApp has been removed from the application UI and notification worker. SMS remains available.
+- My Church home shows upcoming event names with their exact date/time instead of only an event count.
+
+Run migrations in order through `migration_31_portal_progression_abc.sql` and `migration_32_clear_new_test_data.sql` after the earlier migrations. Then deploy the portal function:
+
+```text
+supabase functions deploy create-member-portal-user
+supabase functions deploy notification-worker
+```
+
+Phone authentication must be enabled in Supabase Authentication > Providers > Phone before members can sign in with their phone numbers.
