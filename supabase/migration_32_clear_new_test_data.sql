@@ -1,4 +1,4 @@
--- V32: extend the admin test-data reset for V31 records.
+-- V33: extend the admin test-data reset for V31 records.
 create or replace function public.clear_test_data()
 returns void
 language plpgsql security definer set search_path = public as $$

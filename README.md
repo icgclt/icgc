@@ -104,7 +104,7 @@ supabase functions deploy notification-worker
 
 Phone authentication must be enabled in Supabase Authentication > Providers > Phone before members can sign in with their phone numbers.
 
-## V32 member phone login
+## V33 member phone login
 - Member portal login uses the member's phone number as the username. Ghana numbers such as `0244457816` are normalized to `+233244457816` for Supabase Auth.
 - The portal function generates a temporary password and marks the account `must_change_password=true`. On first login, the member must set a new password before entering the church portal.
 - Creating/resetting a portal account again generates a new temporary password and forces another password change.
@@ -115,3 +115,12 @@ Phone authentication must be enabled in Supabase Authentication > Providers > Ph
 ```text
 supabase functions deploy create-member-portal-user
 ```
+
+
+## V33 member login architecture
+
+Member login is entered as the member's Ghana phone number (for example `0244457816`) plus the system-generated temporary password. Because the hosted Supabase project currently requires an SMS provider before its native Phone provider can be enabled, V33 does **not** require Twilio, MessageBird, Vonage, SMS OTP, or WhatsApp.
+
+Behind the scenes, the Edge Function creates a confirmed internal email alias from the normalized phone number and uses Supabase's already-enabled Email password provider. The alias is not shown to the member. The member still logs in only with their phone number and password.
+
+The first login is marked `must_change_password=true`, and the portal forces the member to choose a new password.

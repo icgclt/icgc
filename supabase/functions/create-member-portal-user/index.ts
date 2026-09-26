@@ -13,6 +13,12 @@ function normalizePhone(value: string) {
   return raw
 }
 
+function memberLoginEmail(phone: string) {
+  const digits = normalizePhone(phone).replace(/\D/g, '')
+  if (!/^233\d{9}$/.test(digits)) return ''
+  return `member-${digits}@members.icgctt.local`
+}
+
 function generatePassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#$%'
   const bytes = crypto.getRandomValues(new Uint8Array(12))
@@ -41,13 +47,15 @@ Deno.serve(async (req) => {
     if (!phone || !/^\+233\d{9}$/.test(phone)) throw new Error('Enter a valid Ghanaian phone number for this member first.')
 
     const temporary_password = generatePassword()
-    const user_metadata = { full_name: member.name, member_id: member.id, must_change_password: true }
+    const login_email = memberLoginEmail(phone)
+    if (!login_email) throw new Error('Could not create a valid member login identifier from this phone number.')
+    const user_metadata = { full_name: member.name, member_id: member.id, must_change_password: true, member_phone: phone }
     let authUserId = member.user_id || null
     if (authUserId) {
-      const { error } = await admin.auth.admin.updateUserById(authUserId, { password: temporary_password, phone, phone_confirm: true, user_metadata })
+      const { error } = await admin.auth.admin.updateUserById(authUserId, { email: login_email, email_confirm: true, password: temporary_password, user_metadata })
       if (error) throw error
     } else {
-      const { data: created, error } = await admin.auth.admin.createUser({ phone, password: temporary_password, phone_confirm: true, user_metadata })
+      const { data: created, error } = await admin.auth.admin.createUser({ email: login_email, email_confirm: true, password: temporary_password, user_metadata })
       if (error) throw error
       authUserId = created.user.id
     }
@@ -56,7 +64,7 @@ Deno.serve(async (req) => {
     const { error: linkError } = await admin.from('members').update({ user_id: authUserId, portal_enabled: true, portal_created_at: new Date().toISOString() }).eq('id', member.id)
     if (linkError) throw linkError
 
-    return new Response(JSON.stringify({ ok: true, phone, temporary_password, member_id: member.id }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+    return new Response(JSON.stringify({ ok: true, phone, login_phone: phone, temporary_password, member_id: member.id }), { headers: { ...cors, 'Content-Type': 'application/json' } })
   } catch (e) {
     return new Response(JSON.stringify({ error: e?.message || String(e) }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } })
   }
