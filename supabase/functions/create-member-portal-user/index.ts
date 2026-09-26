@@ -19,6 +19,10 @@ function generatePassword() {
   return Array.from(bytes, b => chars[b % chars.length]).join('')
 }
 
+function memberLoginEmail(phone: string) {
+  return `member-${phone.replace(/\D/g, '')}@members.local`
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
@@ -41,12 +45,23 @@ Deno.serve(async (req) => {
     if (!phone || !/^\+233\d{9}$/.test(phone)) throw new Error('Enter a valid Ghanaian phone number for this member first.')
 
     const temporary_password = generatePassword()
+    const login_email = memberLoginEmail(phone)
     let authUserId = member.user_id || null
     if (authUserId) {
-      const { error } = await admin.auth.admin.updateUserById(authUserId, { password: temporary_password, phone, phone_confirm: true })
+      const { error } = await admin.auth.admin.updateUserById(authUserId, {
+        email: login_email,
+        email_confirm: true,
+        password: temporary_password,
+        user_metadata: { full_name: member.name, member_id: member.id, login_phone: phone },
+      })
       if (error) throw error
     } else {
-      const { data: created, error } = await admin.auth.admin.createUser({ phone, password: temporary_password, phone_confirm: true, user_metadata: { full_name: member.name, member_id: member.id } })
+      const { data: created, error } = await admin.auth.admin.createUser({
+        email: login_email,
+        password: temporary_password,
+        email_confirm: true,
+        user_metadata: { full_name: member.name, member_id: member.id, login_phone: phone },
+      })
       if (error) throw error
       authUserId = created.user.id
     }
