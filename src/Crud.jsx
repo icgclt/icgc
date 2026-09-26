@@ -27,6 +27,7 @@ function Field({ f, value, error, onChange, list }) {
         list={list ? 'dl_' + f.key : undefined}
         autoComplete="off"
         placeholder={f.placeholder}
+        readOnly={!!f.readOnly}
       />
     );
   }
@@ -42,7 +43,7 @@ function Field({ f, value, error, onChange, list }) {
 
 export default function Crud({
   table, title, noun, fields, columns,
-  filters = [], searchKeys = [], sortKey, sortDir = 'asc', defaults = {}, suggest = {}, onSaved,
+  filters = [], searchKeys = [], sortKey, sortDir = 'asc', defaults = {}, suggest = {}, onSaved, prepareRecord,
 }) {
   const { data, save, remove } = useData();
   const { role } = useAuth();
@@ -110,7 +111,8 @@ export default function Crud({
       }
     }
     const recordId = form.original?.id || uuid();
-    const record = { ...(form.original || {}), ...out, id: recordId };
+    let record = { ...(form.original || {}), ...out, id: recordId };
+    if (prepareRecord) record = prepareRecord(record, form.original || null) || record;
     save(table, record);
     if (onSaved) onSaved(record, form.original || null);
     setForm(null);

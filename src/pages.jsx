@@ -72,7 +72,7 @@ function MemberImport() {
   if (!can(role, 'members', 'write')) return null;
 
   const downloadTemplate = () =>
-    download('members-template.csv', '\ufeff' + MEMBER_CSV_FIELDS.join(',') + '\r\n' + 'M-001,Jane Doe,0244000000,,,Female,Adult,,Active,,,,,,,,\r\n', 'text/csv;charset=utf-8');
+    download('members-template.csv', '\ufeff' + MEMBER_CSV_FIELDS.join(',') + '\r\n' + ',Jane Doe,0244000000,,,Female,Adult,,Active,,,,,,,,\r\n', 'text/csv;charset=utf-8');
 
   const importCSV = async (e) => {
     const file = e.target.files[0];
@@ -160,6 +160,14 @@ function MemberImport() {
   );
 }
 
+function nextMemberCode(members, memberType) {
+  const prefix = memberType === 'Child' ? 'TTC' : memberType === 'Omega' ? 'TTO' : 'TTA';
+  const used = new Set((members || []).map(m => String(m.member_code || '').trim().toUpperCase()).filter(Boolean));
+  let n = 1;
+  while (used.has(prefix + n)) n += 1;
+  return prefix + n;
+}
+
 export function Members() {
   const { data, save } = useData();
 
@@ -191,6 +199,7 @@ export function Members() {
       <Crud
         table="members" title="Members" noun="member"
         sortKey="name" searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
+        prepareRecord={(record, original) => ({ ...record, member_code: original?.member_code || record.member_code || nextMemberCode(data.members, record.member_type || 'Adult') })}
         filters={[
           { key: 'status', label: 'All statuses', options: STATUS },
           { key: 'member_type', label: 'All church groups', options: ['Adult', 'Omega', 'Child'] },
@@ -198,7 +207,7 @@ export function Members() {
         defaults={{ status: 'Active', member_type: 'Adult' }}
         onSaved={syncChildFromMember}
         fields={[
-          { key: 'member_code', label: 'Unique Member ID', required: true, unique: true },
+          { key: 'member_code', label: 'Unique Member ID (automatic)', readOnly: true, unique: true, placeholder: 'Assigned automatically' },
           { key: 'name', label: 'Name', required: true },
           { key: 'phone', label: 'Phone', type: 'tel' },
           { key: 'email', label: 'Email', type: 'email' },
@@ -1356,8 +1365,31 @@ function ChangePassword() {
 }
 
 export function Settings() {
-  const { user, profile } = useAuth();
-  const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed } = useData();
+  const { user, profile, role } = useAuth();
+  const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed, clearTestData } = useData();
+  const [resetPhrase, setResetPhrase] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetMsg, setResetMsg] = useState(null);
+
+  async function handleClearTestData() {
+    setResetMsg(null);
+    if (role !== 'admin') return;
+    if (resetPhrase.trim() !== 'CLEAR TEST DATA') {
+      setResetMsg({ bad: true, t: 'Type CLEAR TEST DATA exactly to continue.' });
+      return;
+    }
+    if (!window.confirm('This will permanently delete the church test data from Supabase. User accounts and system settings will remain. Continue?')) return;
+    setResetBusy(true);
+    try {
+      await clearTestData();
+      setResetPhrase('');
+      setResetMsg({ t: 'Test data cleared successfully. The system is ready for real data entry.' });
+    } catch (e) {
+      setResetMsg({ bad: true, t: e?.message || 'Could not clear test data.' });
+    } finally {
+      setResetBusy(false);
+    }
+  }
   return (
     <>
       <div className="top"><h1>Settings</h1></div>
@@ -1384,6 +1416,19 @@ export function Settings() {
           </>
         )}
       </div>
+      <div className="panel" style={{ border: '2px solid #b91c1c' }}>
+          <h2>🔴 Clear Test Data</h2>
+          <p className="muted">Use this once testing is complete. It permanently removes operational/test records from the church database while keeping administrator accounts, user roles, database structure and system settings.</p>
+          <p><b>Before using this:</b> make a backup if you may need any of the test records later.</p>
+          <label>Type <code>CLEAR TEST DATA</code> to confirm</label>
+          <input value={resetPhrase} onChange={e => setResetPhrase(e.target.value)} placeholder="CLEAR TEST DATA" style={{ width: '100%', maxWidth: 420, marginBottom: 10 }} disabled={resetBusy} />
+          {resetMsg && <div className={resetMsg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{resetMsg.t}</div>}
+          {role === 'admin' ? (
+            <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data…' : 'Permanently Clear Test Data'}</button>
+          ) : (
+            <p className="muted"><b>Administrator only.</b> Sign in with an administrator account to use this reset.</p>
+          )}
+        </div>
       <div className="panel">
         <h2>Backup</h2>
         <p className="muted">Your data lives in Supabase. Download a copy of what this device can see:</p>

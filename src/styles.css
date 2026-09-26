@@ -78,3 +78,8 @@ td.actions{white-space:nowrap}td.actions button{margin-right:6px;padding:6px 10p
 .timer-projector-help { position:absolute; bottom:24px; opacity:.45; font-size:16px; }
 
 .timer-live-page{min-height:calc(100vh - 48px);background:#050505;color:#fff;border-radius:16px;padding:28px;display:flex;flex-direction:column}.timer-live-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.timer-live-head select{background:#171717;color:#fff;border-color:#444;min-width:220px}.timer-live-church{opacity:.65;font-size:14px}.timer-live-head h1{font-size:clamp(28px,5vw,64px);margin:8px 0}.timer-live-role{font-size:clamp(18px,2.5vw,34px);opacity:.75}.timer-live-main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.timer-live-clock{font-size:clamp(100px,28vw,360px);font-weight:900;line-height:.85;letter-spacing:.04em;font-variant-numeric:tabular-nums}.timer-live-clock.overtime{color:#ff5b5b}.timer-live-meta{font-size:clamp(18px,3vw,36px);opacity:.7;margin:24px}.timer-live-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}.timer-live-actions button{font-size:18px;padding:12px 22px}.timer-live-page .muted{color:#aaa}@media(max-width:700px){.timer-live-page{padding:18px}.timer-live-head{flex-direction:column}.timer-live-head select{width:100%}}
+
+/* V29 destructive admin action */
+button.danger { background: #b91c1c; color: #fff; border: 1px solid #991b1b; }
+button.danger:hover { background: #991b1b; }
+button.danger:disabled { opacity: .55; cursor: not-allowed; }

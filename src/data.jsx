@@ -236,8 +236,24 @@ export function DataProvider({ uid, role, children }) {
     removeStored(`cm:profile:${uid}`);
   };
 
+  const clearTestData = async () => {
+    const { error } = await supabase.rpc('clear_test_data');
+    if (error) throw error;
+    outboxRef.current = [];
+    failedRef.current = [];
+    persistOutbox([]);
+    persistFailed([]);
+    setPending(0);
+    setFailed([]);
+    const empty = Object.fromEntries(ACTIVE_TABLES.map((t) => [t, []]));
+    dataRef.current = empty;
+    ACTIVE_TABLES.forEach((t) => removeStored(ck(t), storageForTable(t)));
+    setData(empty);
+    setLastSync(new Date());
+  };
+
   const value = {
-    data, save, remove, wipe, discardFailed,
+    data, save, remove, wipe, clearTestData, discardFailed,
     pending, failed, online, syncError, syncing, lastSync,
     syncNow: () => syncRef.current(true),
   };
