@@ -84,9 +84,9 @@ function Login() {
     <div className="login">
       <form className="loginbox" onSubmit={submit}>
         <h1>⛪ {CHURCH}</h1>
-        <p className="muted">{mode === 'in' ? 'Sign in to continue.' : mode === 'forgot' ? 'Enter your email and we will send you a link to reset your password.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
+        <p className="muted">{mode === 'in' ? 'Sign in to continue.' : mode === 'forgot' ? 'Enter your email address and we will send you a link to reset your password.' : 'Create your account. An administrator must approve it before you can see any data.'}</p>
         {mode === 'up' && <><label>Full name</label><input value={f.name} onChange={set('name')} required /></>}
-        <label>Email or phone number</label><input type="text" value={f.email} onChange={set('email')} required autoComplete="username" placeholder="Email or 0241234567" />
+        <label>{mode === 'forgot' ? 'Email address' : 'Email or phone number'}</label><input type="text" value={f.email} onChange={set('email')} required autoComplete="username" placeholder={mode === 'forgot' ? 'you@example.com' : 'Email or 0241234567'} />
         {mode !== 'forgot' && <><label>Password</label><input type="password" value={f.password} onChange={set('password')} required autoComplete={mode === 'in' ? 'current-password' : 'new-password'} /></>}
         {msg && <div className="err" style={{ marginBottom: 12 }}>{msg}</div>}
         <button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : mode === 'forgot' ? 'Send reset link' : 'Create account'}</button>

@@ -10,6 +10,14 @@ function normalizePhone(value) {
   return raw;
 }
 
+// Member portal accounts use a private synthetic email identity so the app can
+// authenticate with email/password without enabling Supabase's Phone provider
+// or requiring SMS/OTP. Members still log in using their registered phone number.
+function memberLoginEmail(value) {
+  const phone = normalizePhone(value);
+  return `member-${phone.replace(/\D/g, '')}@members.local`;
+}
+
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
 
@@ -93,7 +101,12 @@ export function AuthProvider({ children }) {
     role: profile?.role,
     loading,
     recovery,
-    signIn: (identifier, password) => { const v=String(identifier||'').trim(); return v.includes('@') ? supabase.auth.signInWithPassword({ email:v, password }) : supabase.auth.signInWithPassword({ phone:normalizePhone(v), password }); },
+    signIn: (identifier, password) => {
+      const v = String(identifier || '').trim();
+      return v.includes('@')
+        ? supabase.auth.signInWithPassword({ email: v, password })
+        : supabase.auth.signInWithPassword({ email: memberLoginEmail(v), password });
+    },
     signUp: (email, password, fullName) =>
       supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } }),
     signOut: () => supabase.auth.signOut(),
