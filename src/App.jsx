@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { configured } from './supabase';
-import { AuthProvider, useAuth, can } from './auth';
+import { AuthProvider, useAuth, can, isSuperAdmin } from './auth';
 import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
