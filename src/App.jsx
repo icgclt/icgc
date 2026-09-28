@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { configured, supabase } from './supabase';
+import { useState } from 'react';
+import { configured } from './supabase';
 import { AuthProvider, useAuth, can } from './auth';
 import { DataProvider, useData } from './data';
 import {
@@ -63,7 +63,10 @@ function Login() {
     try {
       if (mode === 'in') {
         const { error } = await signIn(f.email.trim(), f.password);
-        if (error) setMsg(String(error.message || ''));
+        if (error) {
+          const m = String(error.message || '');
+          setMsg(m);
+        }
       } else if (mode === 'forgot') {
         const { error } = await sendResetEmail(f.email.trim());
         setMsg(error ? error.message : 'If that email has an account, a reset link has been sent. Open it on this device.');
@@ -73,7 +76,7 @@ function Login() {
         if (error) setMsg(error.message);
         else if (!data.session) { setMsg('Account created. Check your email to confirm it, then sign in.'); setMode('in'); }
       }
-    } catch {
+    } catch (err) {
       setMsg('Could not reach the server. Check your internet connection and try again.');
     } finally {
       setBusy(false);
@@ -114,7 +117,7 @@ function SetNewPassword({ forced = false }) {
     setBusy(true);
     const { error } = await updatePassword(p1);
     setBusy(false);
-    if (error) setMsg(error.message);
+    if (error) setMsg(error.message); // on success the app continues to the dashboard
   }
   return (
     <div className="login">
@@ -147,66 +150,65 @@ function Pending() {
   );
 }
 
-// A plain entry is [id, label, Component, permissionKey].
-// A group is { group, label, items: [...entries] }.
+// A plain entry is [id, label, Component, permissionTable|null|'ADMIN'].
+// A group is { group, label, items: [...entries] } and shows as one expandable menu item.
 const NAV = [
-  ['dashboard', '📊 Dashboard', Dashboard, 'dashboard.view'],
+  ['dashboard', '📊 Dashboard', Dashboard, null],
   ['memberportal', '🙋 My Church', MemberPortal, null],
   { group: 'members', label: '👥 Members', items: [
-    ['members', 'Members', Members, 'members.view'],
-    ['memberrecord', 'Member Record', MemberLookup, 'members.view'],
+    ['members', 'Members', Members, 'members'],
+    ['memberrecord', 'Member Record', MemberLookup, 'members'],
   ] },
-  ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors.view'],
-  ['followups', '📞 Follow-up', FollowUps, 'followups.view'],
+  ['visitors', '🧑‍🤝‍🧑 Visitors', Visitors, 'visitors'],
+  ['followups', '📞 Follow-up', FollowUps, 'follow_ups'],
   { group: 'ministry', label: '⛪ Ministry', items: [
-    ['groups', 'Groups / House Fellowships', Groups, 'groups.view'],
-    ['abcclass', 'ABC Class', ABCClass, 'groups.view'],
-    ['prayer', 'Prayer Requests', PrayerRequests, 'prayer_requests.view'],
-    ['departments', 'Departments', Departments, 'departments.view'],
-    ['deptdashboard', 'Department Dashboard', DepartmentDashboard, 'departments.view'],
-    ['serviceplans', 'Service Plans', ServicePlans, 'service_plans.view'],
-    ['pastoral', 'Pastoral Care', PastoralCare, 'pastoral_cases.view'],
+    ['groups', 'Groups / House Fellowships', Groups, 'groups'],
+    ['abcclass', 'ABC Class', ABCClass, 'groups'],
+    ['prayer', 'Prayer Requests', PrayerRequests, 'prayer_requests'],
+    ['departments', 'Departments', Departments, 'departments'],
+    ['deptdashboard', 'Department Dashboard', DepartmentDashboard, 'departments'],
+    ['serviceplans', 'Service Plans', ServicePlans, 'service_plans'],
+    ['pastoral', 'Pastoral Care', PastoralCare, 'pastoral_cases'],
   ] },
   { group: 'attendance', label: '✅ Attendance', items: [
-    ['attendance', 'Attendance Records', Attendance, 'attendance.view'],
-    ['adultcheckin', 'Adults Quick Attendance', AdultCheckIn, 'attendance.view'],
-    ['omegacheckin', 'Omega Quick Attendance', OmegaCheckIn, 'attendance.view'],
-    ['childrenattendance', 'Children Quick Attendance', ChildrenQuickAttendance, 'children.view'],
-    ['childcheckin', 'Children Pickup / Release', ChildCheckIn, 'child_checkins.view'],
-    ['headcount', 'Headcount', HeadcountAttendance, 'attendance.view'],
+    ['attendance', 'Attendance Records', Attendance, 'attendance'],
+    ['adultcheckin', 'Adults Quick Attendance', AdultCheckIn, 'attendance'],
+    ['omegacheckin', 'Omega Quick Attendance', OmegaCheckIn, 'attendance'],
+    ['childrenattendance', 'Children Quick Attendance', ChildrenQuickAttendance, 'children'],
+    ['childcheckin', 'Children Pickup / Release', ChildCheckIn, 'child_checkins'],
+    ['headcount', 'Headcount', HeadcountAttendance, 'attendance_headcount'],
   ] },
   { group: 'events', label: '📅 Events', items: [
-    ['events', 'Events', Events, 'events.view'],
-    ['eventattendance', 'Event Attendance', EventAttendance, 'attendance.view'],
+    ['events', 'Events', Events, 'events'],
+    ['eventattendance', 'Event Attendance', EventAttendance, 'attendance'],
   ] },
   { group: 'finance', label: '💰 Finance', items: [
-    ['offerings', 'Offerings', Offerings, 'giving.view'],
-    ['firstfruit', 'First Fruit', FirstFruit, 'contributions.view'],
-    ['membergiving', 'Digital Receipts', MemberGiving, 'payments.view'],
-    ['mobilemoney', 'Mobile Money Payments', MobileMoneyPayments, 'payments.view'],
-    ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'payments.view'],
+    ['offerings', 'Offerings', Offerings, 'offering_entries'],
+    ['firstfruit', 'First Fruit', FirstFruit, 'member_contributions'],
+        ['membergiving', 'Digital Receipts', MemberGiving, 'payment_receipts'],
+    ['mobilemoney', 'Mobile Money Payments', MobileMoneyPayments, 'payment_requests'],
+    ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'finance_reconciliations'],
   ] },
   { group: 'welfare', label: '🤝 Welfare', items: [
-    ['welfaredues', 'Welfare Dues', WelfareDues, 'contributions.view'],
-    ['welfarefund', 'Welfare Fund', WelfareFund, 'payments.view'],
+    ['welfaredues', 'Welfare Dues', WelfareDues, 'member_contributions'],
+    ['welfarefund', 'Welfare Fund', WelfareFund, 'welfare_transactions'],
   ] },
   { group: 'servicetimer', label: '⏱ Service Countdown', items: [
-    ['servicetimer', 'Timer Setup', ServiceTimer, 'service_plans.view'],
-    ['servicetimerlive', 'Live Countdown', ServiceTimerLive, 'service_plans.view'],
+    ['servicetimer', 'Timer Setup', ServiceTimer, 'service_plans'],
+    ['servicetimerlive', 'Live Countdown', ServiceTimerLive, 'service_plans'],
   ] },
-  ['communications', '📢 Communication Center', CommunicationCenter, 'notifications.view'],
-  ['notifications', '📣 Notification Center', NotificationCenter, 'notifications.view'],
-  ['deliverycenter', '🚚 Delivery Center', DeliveryCenter, 'notifications.view'],
-  ['engagement', '🤖 Engagement Automation', EngagementAutomation, 'notifications.manage'],
-  ['automationcenter', '⚙️ Automation Center', AutomationCenter, 'notifications.manage'],
-  ['reports', '📈 Reports', Reports, 'reports.view'],
-  ['advancedreports', '📊 Advanced Reports', AdvancedReports, 'advanced_reports.view'],
-  ['pastordashboard', '🩺 Pastoral Dashboard', PastorDashboard, 'pastoral_cases.view'],
-  ['sms', '💬 Send SMS', SendSMS, 'notifications.manage'],
-  ['users', '🔑 Users', Users, 'users.view'],
-  ['audit', '🧾 Audit Log', AuditLog, 'reports.view'],
-  ['settings', '⚙ Settings', Settings, 'settings.view'],
-  ['permissions', '🔐 Role Permissions', PermissionManager, 'permissions.view'],
+  ['communications', '📢 Communication Center', CommunicationCenter, 'announcements'],
+  ['notifications', '📣 Notification Center', NotificationCenter, 'communication_queue'],
+  ['deliverycenter', '🚚 Delivery Center', DeliveryCenter, 'communication_queue'],
+  ['engagement', '🤖 Engagement Automation', EngagementAutomation, 'announcements'],
+  ['automationcenter', '⚙️ Automation Center', AutomationCenter, 'communication_queue'],
+  ['reports', '📈 Reports', Reports, null],
+  ['advancedreports', '📊 Advanced Reports', AdvancedReports, null],
+  ['pastordashboard', '🩺 Pastoral Dashboard', PastorDashboard, 'pastoral_cases'],
+  ['sms', '💬 Send SMS', SendSMS, 'members'],
+  ['users', '🔑 Users', Users, 'ADMIN'],
+  ['audit', '🧾 Audit Log', AuditLog, 'ADMIN'],
+  ['settings', '⚙ Settings', Settings, null],
 ];
 
 function SyncBadge() {
@@ -221,176 +223,28 @@ function SyncBadge() {
   );
 }
 
-function PermissionManager() {
-  const { role, hasPermission } = useAuth();
-  const [roles, setRoles] = useState([]);
-  const [permissions, setPermissions] = useState([]);
-  const [selectedRole, setSelectedRole] = useState('admin');
-  const [enabled, setEnabled] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [error, setError] = useState('');
-
-  const load = async () => {
-    setLoading(true);
-    setMsg('');
-    setError('');
-
-    const [{ data: defs, error: defsError }, { data: rows, error: rowsError }] = await Promise.all([
-      supabase.from('app_permissions').select('id, permission_key, module, action, label, description').order('module').order('action').order('permission_key'),
-      supabase.from('role_permissions').select('permission_id, enabled').eq('role', selectedRole),
-    ]);
-
-    if (defsError || rowsError) {
-      setError(defsError?.message || rowsError?.message || 'Could not load permissions.');
-      setLoading(false);
-      return;
-    }
-
-    const next = {};
-    (rows || []).forEach((r) => { next[r.permission_id] = !!r.enabled; });
-
-    setPermissions(defs || []);
-    setEnabled(next);
-    setRoles(['admin', 'finance', 'secretary', 'viewer', 'member', 'pending']);
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    if (role === 'super_admin' && hasPermission('permissions.view')) load();
-  }, [role, selectedRole]);
-
-  const grouped = useMemo(() => {
-    const out = {};
-    permissions.forEach((p) => {
-      if (!out[p.module]) out[p.module] = [];
-      out[p.module].push(p);
-    });
-    return out;
-  }, [permissions]);
-
-  const togglePermission = (id) => {
-    setEnabled((current) => ({ ...current, [id]: !current[id] }));
-    setMsg('');
-  };
-
-  const save = async () => {
-    setSaving(true);
-    setMsg('');
-    setError('');
-
-    try {
-      const updates = permissions.map((p) =>
-        supabase
-          .from('role_permissions')
-          .update({ enabled: !!enabled[p.id] })
-          .eq('role', selectedRole)
-          .eq('permission_id', p.id)
-      );
-
-      const results = await Promise.all(updates);
-      const failed = results.find((r) => r.error);
-      if (failed?.error) throw failed.error;
-
-      setMsg(`Permissions for ${selectedRole.replace('_', ' ')} saved successfully.`);
-    } catch (e) {
-      setError(e?.message || String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (role !== 'super_admin') {
-    return (
-      <section>
-        <h1>Role Permissions</h1>
-        <div className="card">
-          <p>You do not have permission to manage role permissions.</p>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section>
-      <h1>🔐 Role Permissions</h1>
-      <p className="muted">Configure which parts of the application each user group can access. Super Admin always has full access.</p>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <label>User group</label>
-        <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} disabled={loading || saving}>
-          {roles.map((r) => <option key={r} value={r}>{r.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</option>)}
-        </select>
-      </div>
-
-      {loading ? (
-        <div className="card"><p className="muted">Loading permissions…</p></div>
-      ) : (
-        <>
-          {Object.entries(grouped).map(([module, items]) => (
-            <div className="card" key={module} style={{ marginBottom: 14 }}>
-              <h2 style={{ marginTop: 0, textTransform: 'capitalize' }}>{module.replace(/_/g, ' ')}</h2>
-              <div style={{ display: 'grid', gap: 10 }}>
-                {items.map((p) => (
-                  <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={!!enabled[p.id]}
-                      onChange={() => togglePermission(p.id)}
-                      disabled={saving}
-                    />
-                    <span>
-                      <strong>{p.label}</strong>
-                      <small style={{ display: 'block' }} className="muted">{p.description || p.permission_key}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
-
-          {msg && <div className="success" style={{ marginBottom: 12 }}>{msg}</div>}
-          {error && <div className="err" style={{ marginBottom: 12 }}>{error}</div>}
-
-          <button className="primary" onClick={save} disabled={saving || loading}>
-            {saving ? 'Saving…' : 'Save Permissions'}
-          </button>
-        </>
-      )}
-    </section>
-  );
-}
-
 function Shell() {
-  const { role, signOut, hasPermission } = useAuth();
+  const { role, signOut } = useAuth();
   const { pending, wipe } = useData();
   const [page, setPage] = useState('dashboard');
   const [open, setOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState({});
 
-  const allowed = ([id, , , need]) => {
-    if (role === 'member') return id === 'memberportal' || id === 'settings';
-    if (!need) return true;
-    return hasPermission(need);
-  };
-
+  const allowed = ([id, , , need]) => role === 'member' ? (id === 'memberportal' || id === 'settings') : (need === null ? true : need === 'ADMIN' ? role === 'admin' : can(role, need, 'read'));
+  // keep only the pages this role may see; drop groups that end up empty
   const menu = NAV
     .map((n) => (Array.isArray(n) ? n : { ...n, items: n.items.filter(allowed) }))
     .filter((n) => (Array.isArray(n) ? allowed(n) : n.items.length > 0));
-
   const flat = menu.flatMap((n) => (Array.isArray(n) ? [n] : n.items));
-  const fallback = flat.find(([id]) => id === 'dashboard') || flat[0];
-  const current = flat.find(([id]) => id === page) || fallback;
-  const Current = current?.[2] || Dashboard;
-  const currentId = current?.[0] || 'dashboard';
+  const Current = (flat.find(([id]) => id === page) || flat[0])[2];
+  const currentId = (flat.find(([id]) => id === page) || flat[0])[0];
 
   const go = (id) => { setPage(id); setOpen(false); };
   const toggle = (g) => setOpenGroups((o) => ({ ...o, [g]: !o[g] }));
 
   async function logout() {
     if (pending > 0 && !confirm(`You have ${pending} unsynced change(s). They stay on this device and will sync the next time you sign in with internet. Sign out anyway?`)) return;
-    if (pending === 0) wipe();
+    if (pending === 0) wipe(); // leave nothing behind on shared devices once everything is synced
     await signOut();
   }
 
@@ -405,7 +259,7 @@ function Shell() {
               return <button key={id} className={currentId === id ? 'active' : ''} onClick={() => go(id)}>{label}</button>;
             }
             const hasActive = n.items.some(([id]) => id === currentId);
-            const expanded = openGroups[n.group] ?? hasActive;
+            const expanded = openGroups[n.group] ?? hasActive; // the group holding the current page is open by default
             return (
               <div key={n.group} className="navgroup">
                 <button className={'grouphead' + (hasActive ? ' hasactive' : '')} onClick={() => toggle(n.group)} aria-expanded={expanded}>

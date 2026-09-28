@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
+import { useAuth, can, ROLES } from './auth';
 import { useData, TABLES } from './data';
 import { supabase } from './supabase';
 import Crud from './Crud';
@@ -63,8 +63,18 @@ export function Dashboard() {
 /* ---------------- Modules (all use the generic Crud component) ---------------- */
 const MEMBER_CSV_FIELDS = ['member_code', 'name', 'phone', 'email', 'dob', 'gender', 'member_type', 'grp', 'status', 'address', 'parent1_name', 'parent1_phone', 'parent1_relationship', 'parent2_name', 'parent2_phone', 'parent2_relationship', 'notes'];
 
+function normalizeGhanaPhone(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (raw.startsWith('+233')) return `+233${digits.slice(-9)}`;
+  if (digits.startsWith('233') && digits.length >= 12) return `0${digits.slice(-9)}`;
+  if (digits.length === 9) return `0${digits}`;
+  return raw;
+}
+
 function MemberImport() {
-  const { data, save } = useData();
+  const { data, syncNow } = useData();
   const { role } = useAuth();
   const fileRef = useRef(null);
   const [msg, setMsg] = useState(null);
@@ -79,61 +89,131 @@ function MemberImport() {
     e.target.value = '';
     if (!file) return;
     setBusy(true);
+    setMsg(null);
     try {
+      // Read the authoritative database state directly. React state can still contain the
+      // previous render immediately after syncNow(), so the importer must not allocate IDs
+      // from a stale closure.
+      await syncNow();
+      const { data: serverMembersBefore, error: membersReadError } = await supabase.from('members').select('*');
+      if (membersReadError) throw new Error(`Could not read current members: ${membersReadError.message}`);
+      const { data: freshHistory, error: historyReadError } = await supabase.from('member_group_history').select('from_member_code,to_member_code');
+      if (historyReadError) throw new Error(`Could not read member ID history: ${historyReadError.message}`);
+      const { data: freshChildren, error: childrenReadError } = await supabase.from('children').select('*');
+      if (childrenReadError) throw new Error(`Could not read children: ${childrenReadError.message}`);
+      const freshMembers = serverMembersBefore || [];
       const rows = parseCSV(await file.text());
-      if (!rows.length) { setMsg({ ok: false, text: 'No rows found in that file — check it has a header row plus at least one member.' }); return; }
-      const byName = new Map(data.members.map((m) => [m.name.trim().toLowerCase(), m]));
-      let added = 0, updated = 0, skipped = 0;
+      if (!rows.length) throw new Error('No rows found. The file must have a header row plus at least one member.');
+
+      const byName = new Map(freshMembers.map((m) => [String(m.name || '').trim().toLowerCase(), m]));
+      const usedCodes = new Set([
+        ...freshMembers.map(m => String(m.member_code || '').trim().toUpperCase()).filter(Boolean),
+        ...freshHistory.flatMap(h => [h.from_member_code, h.to_member_code]).map(c => String(c || '').trim().toUpperCase()).filter(Boolean),
+      ]);
+      const allocateCode = (type) => {
+        const prefix = type === 'Child' ? 'TTC' : type === 'Omega' ? 'TTO' : 'TTA';
+        let n = 1;
+        while (usedCodes.has(prefix + n)) n++;
+        const code = prefix + n;
+        usedCodes.add(code);
+        return code;
+      };
+
+      const membersToUpsert = [];
+      const childrenToUpsert = [];
+      let skipped = 0;
+      let added = 0;
+      let updated = 0;
+
       for (const r of rows) {
-        const name = (r.name || '').trim();
+        const name = String(r.name || '').trim();
         if (!name) { skipped++; continue; }
-        const match = byName.get(name.toLowerCase());
-        const status = r.status || match?.status || 'Active';
-        const memberType = ['Adult','Omega','Child'].includes(r.member_type) ? r.member_type : (match?.member_type || 'Adult');
-        const memberCode = (match?.member_code || nextMemberCode(data.members, memberType, data.member_group_history)).trim();
-        const duplicate = data.members.find(m => String(m.member_code || '').trim().toLowerCase() === memberCode.toLowerCase() && m.id !== match?.id);
-        if (duplicate) { skipped++; continue; }
-        const importId = match ? match.id : uuid();
+        const key = name.toLowerCase();
+        const match = byName.get(key);
+        const memberType = ['Adult', 'Omega', 'Child'].includes(String(r.member_type || '').trim())
+          ? String(r.member_type).trim()
+          : (match?.member_type || 'Adult');
+        const memberCode = String(r.member_code || '').trim().toUpperCase() || match?.member_code || allocateCode(memberType);
+
+        if (usedCodes.has(memberCode) && memberCode !== String(match?.member_code || '').trim().toUpperCase()) {
+          // The code belongs to another member. Do not silently overwrite that member.
+          throw new Error(`Duplicate member ID ${memberCode} in the import for ${name}. Remove the ID or correct the row.`);
+        }
+        usedCodes.add(memberCode);
+
+        const id = match?.id || uuid();
         const importedMember = {
-          id: importId,
+          id,
           member_code: memberCode,
           name,
-          phone: r.phone || match?.phone || '',
+          phone: normalizeGhanaPhone(r.phone || match?.phone || ''),
           email: r.email || match?.email || '',
           dob: r.dob || match?.dob || null,
           gender: r.gender || match?.gender || null,
           member_type: memberType,
           grp: r.grp || r.group || match?.grp || '',
-          status: STATUS.includes(status) ? status : 'Active',
+          status: STATUS.includes(r.status) ? r.status : (match?.status || 'Active'),
           address: r.address || match?.address || '',
           parent1_name: r.parent1_name || match?.parent1_name || '',
-          parent1_phone: r.parent1_phone || match?.parent1_phone || '',
+          parent1_phone: normalizeGhanaPhone(r.parent1_phone || match?.parent1_phone || ''),
           parent1_relationship: r.parent1_relationship || match?.parent1_relationship || '',
           parent2_name: r.parent2_name || match?.parent2_name || '',
-          parent2_phone: r.parent2_phone || match?.parent2_phone || '',
+          parent2_phone: normalizeGhanaPhone(r.parent2_phone || match?.parent2_phone || ''),
           parent2_relationship: r.parent2_relationship || match?.parent2_relationship || '',
           notes: r.notes || match?.notes || '',
         };
-        save('members', importedMember);
+        membersToUpsert.push(importedMember);
+        byName.set(key, importedMember);
+        match ? updated++ : added++;
+
         if (memberType === 'Child') {
-          const existingChild = (data.children || []).find(c => c.member_id === importId);
-          save('children', {
+          const existingChild = freshChildren.find(c => c.member_id === id);
+          childrenToUpsert.push({
             ...(existingChild || {}),
             id: existingChild?.id || uuid(),
-            member_id: importId,
+            member_id: id,
             name,
             dob: importedMember.dob || null,
             gender: importedMember.gender || null,
             guardian_name: [importedMember.parent1_name, importedMember.parent2_name].filter(Boolean).join(' / '),
             guardian_phone: [importedMember.parent1_phone, importedMember.parent2_phone].filter(Boolean).join(' / '),
+            pickup_notes: existingChild?.pickup_notes || '',
+            medical_notes: existingChild?.medical_notes || '',
             status: importedMember.status === 'Inactive' ? 'Inactive' : 'Active',
           });
         }
-        match ? updated++ : added++;
       }
-      setMsg({ ok: true, text: `Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped.` : ''}.` });
+
+      // Write the whole member import as one PostgREST statement. This avoids a successful
+      // first batch followed by a failed second batch leaving a half-imported file.
+      const { data: serverMembers, error: memberWriteError } = await supabase
+        .from('members')
+        .upsert(membersToUpsert, { onConflict: 'id' })
+        .select('*');
+      if (memberWriteError) throw new Error(`Member import failed: ${memberWriteError.message}`);
+
+      if (childrenToUpsert.length) {
+        const { error: childWriteError } = await supabase
+          .from('children')
+          .upsert(childrenToUpsert, { onConflict: 'id' })
+          .select('*');
+        if (childWriteError) throw new Error(`Children import failed: ${childWriteError.message}`);
+      }
+
+      // Confirm the imported IDs exist on the server before refreshing the application cache.
+      const importedIds = serverMembers.map(m => m.id);
+      const { data: confirmed, error: confirmError } = await supabase.from('members').select('id,member_code,name').in('id', importedIds);
+      if (confirmError) throw new Error(`Database confirmation failed: ${confirmError.message}`);
+      if ((confirmed || []).length !== importedIds.length) {
+        throw new Error(`Database confirmation failed: ${confirmed?.length || 0} of ${importedIds.length} imported members were found on the server.`);
+      }
+
+      // Pull the confirmed database state into the app. This prevents the old optimistic/local
+      // cache from making an import appear successful and then disappear later.
+      await syncNow();
+      setMsg({ ok: true, text: `Import complete — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ''}. Database confirmed ${confirmed.length} member records.` });
     } catch (err) {
-      setMsg({ ok: false, text: 'Could not read that file. Make sure it is a plain CSV export.' });
+      setMsg({ ok: false, text: err?.message || 'Import failed. No success message was recorded.' });
     } finally {
       setBusy(false);
     }
@@ -152,7 +232,7 @@ function MemberImport() {
       </div>
       <p className="muted sm">
         CSV columns: <code>{MEMBER_CSV_FIELDS.join(', ')}</code>. Matching by name — a row whose name already
-        exists updates that member instead of creating a duplicate.
+        exists updates that member instead of creating a duplicate. Phone numbers are preserved as Ghana local numbers.
       </p>
       {msg && <div className={msg.ok ? 'muted' : 'err'} style={{ marginTop: 8 }}>{msg.text}</div>}
     </div>
@@ -718,7 +798,7 @@ export function ServiceTimerLive() {
 export function SendSMS() {
   const { data } = useData();
   const { role } = useAuth();
-  const allowed = ['admin', 'secretary'].includes(role) || isSuperAdmin(role);
+  const allowed = ['admin', 'secretary'].includes(role);
   const groups = [...new Set(data.members.map((m) => m.grp).filter(Boolean))].sort();
 
   const [audience, setAudience] = useState('active');
@@ -1192,13 +1272,12 @@ const randomPassword = () => {
   return Array.from(a, (n) => chars[n % chars.length]).join('');
 };
 
-function UserDialog({ mode, target, onClose, onDone, currentRole }) {
+function UserDialog({ mode, target, onClose, onDone }) {
   // mode: 'create' | 'reset'
   const [f, setF] = useState({ full_name: '', email: '', role: 'viewer', password: randomPassword() });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [done, setDone] = useState(null);
-  const roleOptions = isSuperAdmin(currentRole) ? ROLES : ROLES.filter((r) => r !== 'super_admin');
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   async function submit(e) {
@@ -1236,7 +1315,7 @@ function UserDialog({ mode, target, onClose, onDone, currentRole }) {
                 <div className="fld"><small>Full name</small><input value={f.full_name} onChange={set('full_name')} required /></div>
                 <div className="fld"><small>Email</small><input type="email" value={f.email} onChange={set('email')} required /></div>
                 <div className="fld"><small>Role</small>
-                  <select value={f.role} onChange={set('role')}>{roleOptions.map((r) => <option key={r}>{r}</option>)}</select>
+                  <select value={f.role} onChange={set('role')}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
                 </div>
               </>}
               <div className="fld"><small>{mode === 'create' ? 'Password' : 'New password'}</small>
@@ -1256,7 +1335,7 @@ function UserDialog({ mode, target, onClose, onDone, currentRole }) {
 }
 
 export function Users() {
-  const { user, role } = useAuth();
+  const { user } = useAuth();
   const [rows, setRows] = useState(null);
   const [msg, setMsg] = useState('');
   const [dialog, setDialog] = useState(null);
@@ -1267,11 +1346,11 @@ export function Users() {
   };
   useEffect(() => { load(); }, []);
 
-  const change = async (id, newRole) => {
-    try { await adminCall({ action: 'set_role', user_id: id, role: newRole }); load(); }
-    catch (ex) { setMsg(ex.message); }
+  const change = async (id, role) => {
+    const { data, error } = await supabase.from('profiles').update({ role }).eq('id', id).select();
+    if (error || !data?.length) setMsg(error?.message || 'Not updated (no permission).');
+    else load();
   };
-  const roleOptions = isSuperAdmin(role) ? ROLES : ROLES.filter((r) => r !== 'super_admin');
 
   const remove = async (p) => {
     if (!confirm(`Delete the account for ${p.full_name || p.email}? They will no longer be able to sign in. Records they created are kept.`)) return;
@@ -1289,7 +1368,7 @@ export function Users() {
       <div className="tablewrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
         <tbody>{(rows || []).map((p) => <tr key={p.id}>
           <td><b>{p.full_name || '—'}</b></td><td>{p.email}</td>
-          <td><select value={p.role} disabled={p.id === user.id || (p.role === 'super_admin' && !isSuperAdmin(role))} onChange={(e) => change(p.id, e.target.value)}>{roleOptions.map(r => <option key={r}>{r}</option>)}</select></td>
+          <td><select value={p.role} disabled={p.id === user.id} onChange={(e) => change(p.id, e.target.value)}>{ROLES.map(r => <option key={r}>{r}</option>)}</select></td>
           <td>{String(p.created_at).slice(0, 10)}</td>
           <td className="actions"><button className="secondary" onClick={() => setDialog({ mode: 'reset', target: p })}>Reset password</button>{p.id !== user.id && <button className="danger" onClick={() => remove(p)}>Delete</button>}</td>
         </tr>)}
@@ -1297,7 +1376,7 @@ export function Users() {
         {!rows && <tr><td colSpan="5" className="empty">Loading…</td></tr>}</tbody>
       </table></div>
     </div>
-    {dialog && <UserDialog {...dialog} currentRole={role} onClose={() => setDialog(null)} onDone={load} />}
+    {dialog && <UserDialog {...dialog} onClose={() => setDialog(null)} onDone={load} />}
   </>;
 }
 
@@ -1317,7 +1396,7 @@ export function Visitors() {
 export function ABCClass() {
   const { data, save, remove } = useData();
   const { role } = useAuth();
-  const canWrite = ['admin','secretary'].includes(role) || isSuperAdmin(role);
+  const canWrite = ['admin','secretary'].includes(role);
   const [q, setQ] = useState('');
   const [date, setDate] = useState(today());
   const [startDate, setStartDate] = useState('');
@@ -1447,8 +1526,8 @@ export function PastoralCare() {
 export function AuditLog() {
   const { role } = useAuth();
   const [rows,setRows]=useState([]); const [error,setError]=useState('');
-  useEffect(()=>{ if(!isAdmin(role)) return; supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);}); },[role]);
-  if(!isAdmin(role)) return <div className="panel"><h1>Audit Log</h1><p className="muted">Admin access only.</p></div>;
+  useEffect(()=>{ if(role!=='admin') return; supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);}); },[role]);
+  if(role!=='admin') return <div className="panel"><h1>Audit Log</h1><p className="muted">Admin access only.</p></div>;
   return <><div className="top"><h1>Audit Log</h1><button className="secondary" onClick={()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);})}>Refresh</button></div>
     <div className="panel">{error&&<div className="err">{error}</div>}<div className="tablewrap"><table><thead><tr><th>Time</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{new Date(r.at).toLocaleString()}</td><td>{r.table_name}</td><td>{badge(r.action)}</td><td>{r.row_id}</td><td>{r.actor||'System'}</td></tr>)}{!rows.length&&<tr><td colSpan="5" className="empty">No audit records.</td></tr>}</tbody></table></div></div></>;
 }
@@ -1487,7 +1566,7 @@ export function Settings() {
 
   async function handleClearTestData() {
     setResetMsg(null);
-    if (!isSuperAdmin(role)) return;
+    if (role !== 'admin') return;
     if (resetPhrase.trim() !== 'CLEAR TEST DATA') {
       setResetMsg({ bad: true, t: 'Type CLEAR TEST DATA exactly to continue.' });
       return;
@@ -1530,15 +1609,19 @@ export function Settings() {
           </>
         )}
       </div>
-      {isSuperAdmin(role) && <div className="panel" style={{ border: '2px solid #b91c1c' }}>
+      <div className="panel" style={{ border: '2px solid #b91c1c' }}>
           <h2>🔴 Clear Test Data</h2>
-          <p className="muted">Super Admin only. Use this once testing is complete. It permanently removes operational/test records from the church database while keeping administrator accounts, user roles, database structure and system settings.</p>
+          <p className="muted">Use this once testing is complete. It permanently removes operational/test records from the church database while keeping administrator accounts, user roles, database structure and system settings.</p>
           <p><b>Before using this:</b> make a backup if you may need any of the test records later.</p>
           <label>Type <code>CLEAR TEST DATA</code> to confirm</label>
           <input value={resetPhrase} onChange={e => setResetPhrase(e.target.value)} placeholder="CLEAR TEST DATA" style={{ width: '100%', maxWidth: 420, marginBottom: 10 }} disabled={resetBusy} />
           {resetMsg && <div className={resetMsg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{resetMsg.t}</div>}
-          <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data…' : 'Permanently Clear Test Data'}</button>
-        </div>}
+          {role === 'admin' ? (
+            <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data…' : 'Permanently Clear Test Data'}</button>
+          ) : (
+            <p className="muted"><b>Administrator only.</b> Sign in with an administrator account to use this reset.</p>
+          )}
+        </div>
       <div className="panel">
         <h2>Backup</h2>
         <p className="muted">Your data lives in Supabase. Download a copy of what this device can see:</p>
@@ -1759,7 +1842,7 @@ export function FinanceCenter() {
 export function CommunicationCenter() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const active = data.members.filter(m=>m.status==='Active' && m.phone).length;
   const announcements = [...data.announcements].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))).slice(0,8);
   return <>
@@ -1777,7 +1860,7 @@ export function CommunicationCenter() {
 export function PastorDashboard() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary','viewer'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
+  if (!['admin','secretary','viewer'].includes(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
   const openCases=data.pastoral_cases.filter(x=>!['Closed','Resolved'].includes(x.status)).length;
   const openFollow=data.follow_ups.filter(x=>['Open','In Progress'].includes(x.status)).length;
   const prayers=data.prayer_requests.filter(x=>!['Answered','Closed'].includes(x.status)).length;
@@ -1797,7 +1880,7 @@ export function PastorDashboard() {
 export function MemberGiving() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','finance','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
+  if (!['admin','finance','secretary'].includes(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
   const rows=[...(data.payment_receipts||[])].sort((a,b)=>String(b.paid_at||b.created_at).localeCompare(String(a.paid_at||a.created_at)));
   const paid=rows.filter(r=>r.status==='Paid').reduce((a,r)=>a+Number(r.amount||0),0);
   const pending=rows.filter(r=>r.status==='Pending').reduce((a,r)=>a+Number(r.amount||0),0);
@@ -1820,7 +1903,7 @@ export function MemberGiving() {
 export function EngagementAutomation() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const templates=[...(data.communication_templates||[])].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
   const queue=[...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const birthdayCount=data.members.filter(m=>m.dob && String(m.dob).slice(5)===today().slice(5)).length;
@@ -1844,7 +1927,7 @@ export function EngagementAutomation() {
 export function FinanceReconciliation() {
   const { data, save } = useData();
   const { role } = useAuth();
-  if (!['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
+  if (!['admin','finance'].includes(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
   const [date,setDate]=useState(today());
   const [method,setMethod]=useState('All');
   const [note,setNote]=useState('');
@@ -1880,7 +1963,7 @@ export function FinanceReconciliation() {
 export function AutomationCenter() {
   const { data, save } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const [channel,setChannel]=useState('SMS');
   const [runMsg,setRunMsg]=useState('');
   const templates=(data.communication_templates||[]).filter(t=>t.active);
@@ -1973,7 +2056,7 @@ export function MobileMoneyPayments() {
   const allowed = ['admin','finance'];
   const [memberId,setMemberId]=useState(''); const [amount,setAmount]=useState(''); const [fund,setFund]=useState('Offering');
   const [phone,setPhone]=useState(''); const [provider,setProvider]=useState('mtn'); const [status,setStatus]=useState('');
-  if (!allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Mobile Money Payments</h2><p className="muted">Only administrators and finance users have access.</p></div>;
+  if (!allowed.includes(role)) return <div className="panel"><h2>Mobile Money Payments</h2><p className="muted">Only administrators and finance users have access.</p></div>;
   const members=(data.members||[]).filter(m=>m.status!=='Inactive').sort((a,b)=>String(a.name).localeCompare(String(b.name)));
   const requests=[...(data.payment_requests||[])].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,50);
   const createRequest=async()=>{ const m=members.find(x=>x.id===memberId); const n=Number(amount);
@@ -2006,7 +2089,7 @@ export function DeliveryCenter() {
   const { role } = useAuth();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const allowed = ['admin','secretary'].includes(role) || isSuperAdmin(role);
+  const allowed = ['admin','secretary'].includes(role);
   const queue = [...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const queued = queue.filter(q=>q.status==='Queued');
   const failed = queue.filter(q=>q.status==='Failed');
@@ -2043,7 +2126,7 @@ export function NotificationCenter() {
   const [message,setMessage] = useState('');
   const [schedule,setSchedule] = useState('');
   const [status,setStatus] = useState('');
-  if (!allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!allowed.includes(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
 
   const members=(data.members||[]).filter(m=>m.status!=='Inactive');
   const targetMembers = useMemo(() => {

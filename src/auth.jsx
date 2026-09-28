@@ -25,10 +25,7 @@ export function memberLoginEmail(value) {
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
 
-export const ROLES = ['super_admin', 'admin', 'finance', 'secretary', 'viewer', 'member', 'pending'];
-export const effectiveRole = (role) => role === 'super_admin' ? 'admin' : role;
-export const isSuperAdmin = (role) => role === 'super_admin';
-export const isAdmin = (role) => role === 'admin' || role === 'super_admin';
+export const ROLES = ['admin', 'finance', 'secretary', 'viewer', 'member', 'pending'];
 // Mirrors the row-level security policies in supabase/schema.sql (the database is the real enforcer;
 // this only decides which buttons and pages to show).
 export const PERMS = {
@@ -61,117 +58,28 @@ export const PERMS = {
   communication_queue:   { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
   finance_reconciliations:{ read: ['admin','finance'], write: ['admin','finance'], del: ['admin'] },
 };
-export const can = (role, table, action) => PERMS[table]?.[action]?.includes(effectiveRole(role)) || false;
+export const can = (role, table, action) => PERMS[table]?.[action]?.includes(role) || false;
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [permissions, setPermissions] = useState([]);
-  const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [recovery, setRecovery] = useState(false); // true while the user is setting a new password from an emailed link
 
-  // Load the permissions assigned to the signed-in user's role.
-  // Super Admin is always allowed every defined permission.
-  const loadPermissions = useCallback(async (user) => {
-    if (!user) {
-      setPermissions([]);
-      setPermissionsLoading(false);
-      return;
-    }
-
-    setPermissionsLoading(true);
-
-    try {
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profileError) {
-        setPermissions([]);
-        return;
-      }
-
-      const userRole = profileData?.role;
-
-      if (userRole === 'super_admin') {
-        const { data: allPermissions, error: allError } = await supabase
-          .from('app_permissions')
-          .select('permission_key');
-
-        if (!allError) {
-          setPermissions((allPermissions || []).map((p) => p.permission_key).filter(Boolean));
-        } else {
-          // Super Admin remains unrestricted even if the permission catalogue
-          // cannot be read temporarily.
-          setPermissions([]);
-        }
-        return;
-      }
-
-      if (!userRole) {
-        setPermissions([]);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('role_permissions')
-        .select(`
-          enabled,
-          app_permissions (
-            permission_key
-          )
-        `)
-        .eq('role', userRole)
-        .eq('enabled', true);
-
-      if (error) {
-        setPermissions([]);
-        return;
-      }
-
-      setPermissions(
-        (data || [])
-          .map((row) => row.app_permissions?.permission_key)
-          .filter(Boolean)
-      );
-    } finally {
-      setPermissionsLoading(false);
-    }
-  }, []);
-
-  // Load the signed-in user's profile. Keep this callback below loadPermissions
-  // so the dependency array can safely reference loadPermissions.
   const loadProfile = useCallback(async (user) => {
-    if (!user) {
-      setProfile(null);
-      setPermissions([]);
-      setPermissionsLoading(false);
-      return;
-    }
-
+    if (!user) { setProfile(null); return; }
     const ck = `cm:profile:${user.id}`;
     const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
     if (data) {
       setProfile(data);
       try { localStorage.setItem(ck, JSON.stringify(data)); } catch { /* ignore */ }
-      await loadPermissions(user);
     } else if (error) {
       // offline / server unreachable: fall back to the last known profile for this signed-in user
-      try {
-        const c = JSON.parse(localStorage.getItem(ck));
-        if (c) {
-          setProfile(c);
-          await loadPermissions(user);
-        }
-      } catch { /* ignore */ }
+      try { const c = JSON.parse(localStorage.getItem(ck)); if (c) setProfile(c); } catch { /* ignore */ }
     } else {
       setProfile(null);
-      setPermissions([]);
     }
-  }, [loadPermissions]);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -195,10 +103,6 @@ export function AuthProvider({ children }) {
     user: session?.user ?? null,
     profile,
     role: profile?.role,
-    permissions,
-    permissionsLoading,
-    hasPermission: (permissionKey) =>
-      profile?.role === 'super_admin' || permissions.includes(permissionKey),
     loading,
     recovery,
     signIn: (identifier, password) => {
@@ -222,11 +126,7 @@ export function AuthProvider({ children }) {
       }
       return res;
     },
-    refreshProfile: async () => {
-      await loadProfile(session?.user);
-      await loadPermissions(session?.user);
-    },
-    refreshPermissions: () => loadPermissions(session?.user),
+    refreshProfile: () => loadProfile(session?.user),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
