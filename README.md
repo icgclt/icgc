@@ -124,3 +124,13 @@ Member login is entered as the member's Ghana phone number (for example `0244457
 Behind the scenes, the Edge Function creates a confirmed internal email alias from the normalized phone number and uses Supabase's already-enabled Email password provider. The alias is not shown to the member. The member still logs in only with their phone number and password.
 
 The first login is marked `must_change_password=true`, and the portal forces the member to choose a new password.
+
+
+## V34 member CSV import reliability
+- Bulk member import writes directly to Supabase instead of relying on the offline outbox.
+- The importer reads the authoritative member/ID-history database state before allocating IDs.
+- Adult, Omega and Child IDs are allocated without reusing existing or historical IDs.
+- Ghana local phone numbers retain their leading zero.
+- Import success is reported only after Supabase confirms every imported member.
+- The app then refreshes from the confirmed database state, preventing imported members from disappearing during the next sync.
+- Duplicate member IDs are rejected instead of silently overwriting another member.

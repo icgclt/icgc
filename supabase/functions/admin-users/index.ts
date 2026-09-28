@@ -12,7 +12,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const ROLES = ['admin', 'finance', 'secretary', 'viewer', 'pending', 'super_admin'];
+const ROLES = ['admin', 'finance', 'secretary', 'viewer', 'pending'];
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -30,8 +30,7 @@ Deno.serve(async (req) => {
     const { data: { user }, error: authErr } = await caller.auth.getUser();
     if (authErr || !user) return json({ error: 'Not signed in.' }, 401);
     const { data: me } = await caller.from('profiles').select('role').eq('id', user.id).maybeSingle();
-    const callerRole = me?.role;
-    if (!['admin', 'super_admin'].includes(callerRole)) return json({ error: 'Only an administrator can do this.' }, 403);
+    if (me?.role !== 'admin') return json({ error: 'Only an administrator can do this.' }, 403);
 
     // 2. Privileged client (bypasses RLS) used only after the admin check above.
     const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
@@ -46,7 +45,6 @@ Deno.serve(async (req) => {
       if (!email) return json({ error: 'Email is required.' }, 400);
       if (password.length < 6) return json({ error: 'Password must be at least 6 characters.' }, 400);
       if (!ROLES.includes(role)) return json({ error: 'Invalid role.' }, 400);
-      if (role === 'super_admin' && callerRole !== 'super_admin') return json({ error: 'Only the Super Admin can create a Super Admin account.' }, 403);
 
       const { data, error } = await admin.auth.admin.createUser({
         email, password, email_confirm: true, user_metadata: { full_name: fullName },
@@ -59,27 +57,10 @@ Deno.serve(async (req) => {
       return json({ ok: true, id: data.user.id });
     }
 
-    if (action === 'set_role') {
-      if (!body.user_id) return json({ error: 'user_id is required.' }, 400);
-      const role = String(body.role || '');
-      if (!ROLES.includes(role)) return json({ error: 'Invalid role.' }, 400);
-      if (body.user_id === user.id) return json({ error: 'You cannot change your own role.' }, 400);
-      const { data: target } = await admin.from('profiles').select('id,role').eq('id', body.user_id).maybeSingle();
-      if (!target) return json({ error: 'User profile not found.' }, 404);
-      if ((target.role === 'super_admin' || role === 'super_admin') && callerRole !== 'super_admin') {
-        return json({ error: 'Only the Super Admin can create, change or remove a Super Admin role.' }, 403);
-      }
-      const { error } = await admin.from('profiles').update({ role }).eq('id', body.user_id);
-      if (error) return json({ error: error.message }, 400);
-      return json({ ok: true });
-    }
-
     if (action === 'reset_password') {
       const password = String(body.password || '');
       if (!body.user_id) return json({ error: 'user_id is required.' }, 400);
       if (password.length < 6) return json({ error: 'Password must be at least 6 characters.' }, 400);
-      const { data: target } = await admin.from('profiles').select('id,role').eq('id', body.user_id).maybeSingle();
-      if (target?.role === 'super_admin' && callerRole !== 'super_admin') return json({ error: 'Only the Super Admin can reset a Super Admin password.' }, 403);
       const { error } = await admin.auth.admin.updateUserById(body.user_id, { password });
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });
@@ -88,8 +69,6 @@ Deno.serve(async (req) => {
     if (action === 'delete') {
       if (!body.user_id) return json({ error: 'user_id is required.' }, 400);
       if (body.user_id === user.id) return json({ error: 'You cannot delete your own account.' }, 400);
-      const { data: target } = await admin.from('profiles').select('id,role').eq('id', body.user_id).maybeSingle();
-      if (target?.role === 'super_admin' && callerRole !== 'super_admin') return json({ error: 'Only the Super Admin can delete a Super Admin account.' }, 403);
       const { error } = await admin.auth.admin.deleteUser(body.user_id);
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });
