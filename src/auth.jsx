@@ -25,7 +25,8 @@ export function memberLoginEmail(value) {
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
 
-export const ROLES = ['admin', 'finance', 'secretary', 'viewer', 'member', 'pending'];
+export const ROLES = ['super_admin', 'admin', 'finance', 'secretary', 'viewer', 'member', 'pending'];
+export const isSuperAdmin = (role) => role === 'super_admin' || role === 'admin';
 // Mirrors the row-level security policies in supabase/schema.sql (the database is the real enforcer;
 // this only decides which buttons and pages to show).
 export const PERMS = {
@@ -58,7 +59,7 @@ export const PERMS = {
   communication_queue:   { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
   finance_reconciliations:{ read: ['admin','finance'], write: ['admin','finance'], del: ['admin'] },
 };
-export const can = (role, table, action) => PERMS[table]?.[action]?.includes(role) || false;
+export const can = (role, table, action) => isSuperAdmin(role) || PERMS[table]?.[action]?.includes(role) || false;
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);

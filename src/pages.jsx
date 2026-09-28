@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth, can, ROLES } from './auth';
+import { useAuth, can, ROLES, isSuperAdmin } from './auth';
 import { useData, TABLES } from './data';
 import { supabase } from './supabase';
 import Crud from './Crud';
@@ -798,7 +798,7 @@ export function ServiceTimerLive() {
 export function SendSMS() {
   const { data } = useData();
   const { role } = useAuth();
-  const allowed = ['admin', 'secretary'].includes(role);
+  const allowed = isSuperAdmin(role) || ['secretary'].includes(role);
   const groups = [...new Set(data.members.map((m) => m.grp).filter(Boolean))].sort();
 
   const [audience, setAudience] = useState('active');
@@ -1315,7 +1315,7 @@ function UserDialog({ mode, target, onClose, onDone }) {
                 <div className="fld"><small>Full name</small><input value={f.full_name} onChange={set('full_name')} required /></div>
                 <div className="fld"><small>Email</small><input type="email" value={f.email} onChange={set('email')} required /></div>
                 <div className="fld"><small>Role</small>
-                  <select value={f.role} onChange={set('role')}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
+                  <select value={f.role} onChange={set('role')}>{ROLES.map((r) => <option key={r} value={r}>{r === 'super_admin' ? 'Super Admin' : r}</option>)}</select>
                 </div>
               </>}
               <div className="fld"><small>{mode === 'create' ? 'Password' : 'New password'}</small>
@@ -1368,7 +1368,7 @@ export function Users() {
       <div className="tablewrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
         <tbody>{(rows || []).map((p) => <tr key={p.id}>
           <td><b>{p.full_name || '—'}</b></td><td>{p.email}</td>
-          <td><select value={p.role} disabled={p.id === user.id} onChange={(e) => change(p.id, e.target.value)}>{ROLES.map(r => <option key={r}>{r}</option>)}</select></td>
+          <td><select value={p.role} disabled={p.id === user.id} onChange={(e) => change(p.id, e.target.value)}>{ROLES.map(r => <option key={r} value={r}>{r === 'super_admin' ? 'Super Admin' : r}</option>)}</select></td>
           <td>{String(p.created_at).slice(0, 10)}</td>
           <td className="actions"><button className="secondary" onClick={() => setDialog({ mode: 'reset', target: p })}>Reset password</button>{p.id !== user.id && <button className="danger" onClick={() => remove(p)}>Delete</button>}</td>
         </tr>)}
@@ -1396,7 +1396,7 @@ export function Visitors() {
 export function ABCClass() {
   const { data, save, remove } = useData();
   const { role } = useAuth();
-  const canWrite = ['admin','secretary'].includes(role);
+  const canWrite = isSuperAdmin(role) || ['secretary'].includes(role);
   const [q, setQ] = useState('');
   const [date, setDate] = useState(today());
   const [startDate, setStartDate] = useState('');
@@ -1526,8 +1526,8 @@ export function PastoralCare() {
 export function AuditLog() {
   const { role } = useAuth();
   const [rows,setRows]=useState([]); const [error,setError]=useState('');
-  useEffect(()=>{ if(role!=='admin') return; supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);}); },[role]);
-  if(role!=='admin') return <div className="panel"><h1>Audit Log</h1><p className="muted">Admin access only.</p></div>;
+  useEffect(()=>{ if(!isSuperAdmin(role)) return; supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);}); },[role]);
+  if(!isSuperAdmin(role)) return <div className="panel"><h1>Audit Log</h1><p className="muted">Super Admin access only.</p></div>;
   return <><div className="top"><h1>Audit Log</h1><button className="secondary" onClick={()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);})}>Refresh</button></div>
     <div className="panel">{error&&<div className="err">{error}</div>}<div className="tablewrap"><table><thead><tr><th>Time</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{new Date(r.at).toLocaleString()}</td><td>{r.table_name}</td><td>{badge(r.action)}</td><td>{r.row_id}</td><td>{r.actor||'System'}</td></tr>)}{!rows.length&&<tr><td colSpan="5" className="empty">No audit records.</td></tr>}</tbody></table></div></div></>;
 }
@@ -1566,7 +1566,7 @@ export function Settings() {
 
   async function handleClearTestData() {
     setResetMsg(null);
-    if (role !== 'admin') return;
+    if (!isSuperAdmin(role)) return;
     if (resetPhrase.trim() !== 'CLEAR TEST DATA') {
       setResetMsg({ bad: true, t: 'Type CLEAR TEST DATA exactly to continue.' });
       return;
@@ -1616,7 +1616,7 @@ export function Settings() {
           <label>Type <code>CLEAR TEST DATA</code> to confirm</label>
           <input value={resetPhrase} onChange={e => setResetPhrase(e.target.value)} placeholder="CLEAR TEST DATA" style={{ width: '100%', maxWidth: 420, marginBottom: 10 }} disabled={resetBusy} />
           {resetMsg && <div className={resetMsg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{resetMsg.t}</div>}
-          {role === 'admin' ? (
+          {isSuperAdmin(role) ? (
             <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data…' : 'Permanently Clear Test Data'}</button>
           ) : (
             <p className="muted"><b>Administrator only.</b> Sign in with an administrator account to use this reset.</p>
@@ -1842,7 +1842,7 @@ export function FinanceCenter() {
 export function CommunicationCenter() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!isSuperAdmin(role) && !['secretary'].includes(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const active = data.members.filter(m=>m.status==='Active' && m.phone).length;
   const announcements = [...data.announcements].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))).slice(0,8);
   return <>
@@ -1860,7 +1860,7 @@ export function CommunicationCenter() {
 export function PastorDashboard() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary','viewer'].includes(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
+  if (!isSuperAdmin(role) && !['secretary','viewer'].includes(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
   const openCases=data.pastoral_cases.filter(x=>!['Closed','Resolved'].includes(x.status)).length;
   const openFollow=data.follow_ups.filter(x=>['Open','In Progress'].includes(x.status)).length;
   const prayers=data.prayer_requests.filter(x=>!['Answered','Closed'].includes(x.status)).length;
@@ -1880,7 +1880,7 @@ export function PastorDashboard() {
 export function MemberGiving() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','finance','secretary'].includes(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
+  if (!isSuperAdmin(role) || ['finance','secretary'].includes(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
   const rows=[...(data.payment_receipts||[])].sort((a,b)=>String(b.paid_at||b.created_at).localeCompare(String(a.paid_at||a.created_at)));
   const paid=rows.filter(r=>r.status==='Paid').reduce((a,r)=>a+Number(r.amount||0),0);
   const pending=rows.filter(r=>r.status==='Pending').reduce((a,r)=>a+Number(r.amount||0),0);
@@ -1903,7 +1903,7 @@ export function MemberGiving() {
 export function EngagementAutomation() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!isSuperAdmin(role) && !['secretary'].includes(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const templates=[...(data.communication_templates||[])].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
   const queue=[...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const birthdayCount=data.members.filter(m=>m.dob && String(m.dob).slice(5)===today().slice(5)).length;
@@ -1927,7 +1927,7 @@ export function EngagementAutomation() {
 export function FinanceReconciliation() {
   const { data, save } = useData();
   const { role } = useAuth();
-  if (!['admin','finance'].includes(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
+  if (!isSuperAdmin(role) && !['finance'].includes(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
   const [date,setDate]=useState(today());
   const [method,setMethod]=useState('All');
   const [note,setNote]=useState('');
@@ -1963,7 +1963,7 @@ export function FinanceReconciliation() {
 export function AutomationCenter() {
   const { data, save } = useData();
   const { role } = useAuth();
-  if (!['admin','secretary'].includes(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!isSuperAdmin(role) && !['secretary'].includes(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const [channel,setChannel]=useState('SMS');
   const [runMsg,setRunMsg]=useState('');
   const templates=(data.communication_templates||[]).filter(t=>t.active);
@@ -2053,10 +2053,10 @@ export function AdvancedReports() {
 export function MobileMoneyPayments() {
   const { data, save } = useData();
   const { role } = useAuth();
-  const allowed = ['admin','finance'];
+  const allowed = isSuperAdmin(role) || ['finance'].includes(role);
   const [memberId,setMemberId]=useState(''); const [amount,setAmount]=useState(''); const [fund,setFund]=useState('Offering');
   const [phone,setPhone]=useState(''); const [provider,setProvider]=useState('mtn'); const [status,setStatus]=useState('');
-  if (!allowed.includes(role)) return <div className="panel"><h2>Mobile Money Payments</h2><p className="muted">Only administrators and finance users have access.</p></div>;
+  if (!allowed) return <div className="panel"><h2>Mobile Money Payments</h2><p className="muted">Only administrators and finance users have access.</p></div>;
   const members=(data.members||[]).filter(m=>m.status!=='Inactive').sort((a,b)=>String(a.name).localeCompare(String(b.name)));
   const requests=[...(data.payment_requests||[])].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,50);
   const createRequest=async()=>{ const m=members.find(x=>x.id===memberId); const n=Number(amount);
@@ -2089,7 +2089,7 @@ export function DeliveryCenter() {
   const { role } = useAuth();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const allowed = ['admin','secretary'].includes(role);
+  const allowed = isSuperAdmin(role) || role === 'secretary';
   const queue = [...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const queued = queue.filter(q=>q.status==='Queued');
   const failed = queue.filter(q=>q.status==='Failed');
@@ -2119,14 +2119,14 @@ export function DeliveryCenter() {
 export function NotificationCenter() {
   const { data, save } = useData();
   const { role } = useAuth();
-  const allowed = ['admin','secretary'];
+  const allowed = isSuperAdmin(role) || ['secretary'].includes(role);
   const [channel,setChannel] = useState('In-app');
   const [audience,setAudience] = useState('All Members');
   const [title,setTitle] = useState('');
   const [message,setMessage] = useState('');
   const [schedule,setSchedule] = useState('');
   const [status,setStatus] = useState('');
-  if (!allowed.includes(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!allowed) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
 
   const members=(data.members||[]).filter(m=>m.status!=='Inactive');
   const targetMembers = useMemo(() => {

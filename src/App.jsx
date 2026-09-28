@@ -230,7 +230,7 @@ function Shell() {
   const [open, setOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState({});
 
-  const allowed = ([id, , , need]) => role === 'member' ? (id === 'memberportal' || id === 'settings') : (need === null ? true : need === 'ADMIN' ? role === 'admin' : can(role, need, 'read'));
+  const allowed = ([id, , , need]) => role === 'member' ? (id === 'memberportal' || id === 'settings') : (need === null ? true : need === 'ADMIN' ? isSuperAdmin(role) : can(role, need, 'read'));
   // keep only the pages this role may see; drop groups that end up empty
   const menu = NAV
     .map((n) => (Array.isArray(n) ? n : { ...n, items: n.items.filter(allowed) }))
