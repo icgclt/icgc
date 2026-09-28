@@ -12,7 +12,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const ROLES = ['admin', 'finance', 'secretary', 'viewer', 'pending'];
+const ROLES = ['super_admin', 'admin', 'finance', 'secretary', 'viewer', 'pending'];
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
     const { data: { user }, error: authErr } = await caller.auth.getUser();
     if (authErr || !user) return json({ error: 'Not signed in.' }, 401);
     const { data: me } = await caller.from('profiles').select('role').eq('id', user.id).maybeSingle();
-    if (me?.role !== 'admin') return json({ error: 'Only an administrator can do this.' }, 403);
+    if (!['super_admin', 'admin'].includes(me?.role)) return json({ error: 'Only a Super Admin can do this.' }, 403);
 
     // 2. Privileged client (bypasses RLS) used only after the admin check above.
     const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });

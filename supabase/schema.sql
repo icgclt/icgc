@@ -17,7 +17,7 @@ create table public.profiles (
   email      text,
   full_name  text default '',
   role       text not null default 'pending'
-             check (role in ('admin','finance','secretary','viewer','pending')),
+             check (role in ('super_admin','admin','finance','secretary','viewer','pending')),
   created_at timestamptz not null default now()
 );
 alter table public.profiles enable row level security;
@@ -25,14 +25,14 @@ alter table public.profiles enable row level security;
 -- Returns the caller's role. SECURITY DEFINER so policies can use it without recursion.
 create or replace function public.app_role() returns text
 language sql stable security definer set search_path = public as
-$$ select role from public.profiles where id = auth.uid() $$;
+$$ select case when role = 'super_admin' then 'admin' else role end from public.profiles where id = auth.uid() $$;
 revoke all on function public.app_role() from public, anon;
 grant execute on function public.app_role() to authenticated;
 
 create policy profiles_select on public.profiles for select to authenticated
-  using (id = auth.uid() or public.app_role() = 'admin');
+  using (id = auth.uid() or public.app_role() in ('super_admin','admin'));
 create policy profiles_update on public.profiles for update to authenticated
-  using (public.app_role() = 'admin') with check (public.app_role() = 'admin');
+  using (public.app_role() in ('super_admin','admin')) with check (public.app_role() in ('super_admin','admin'));
 
 -- Auto-create a profile when someone signs up. First user = admin, the rest = pending.
 create or replace function public.handle_new_user() returns trigger
@@ -41,7 +41,7 @@ begin
   insert into public.profiles (id, email, full_name, role)
   values (
     new.id, new.email, coalesce(new.raw_user_meta_data->>'full_name', ''),
-    case when exists (select 1 from public.profiles) then 'pending' else 'admin' end
+    case when exists (select 1 from public.profiles) then 'pending' else 'super_admin' end
   );
   return new;
 end $$;
@@ -145,7 +145,7 @@ create table public.audit_log (
 );
 alter table public.audit_log enable row level security;
 create policy audit_select on public.audit_log for select to authenticated
-  using (public.app_role() = 'admin');
+  using (public.app_role() in ('super_admin','admin'));
 
 create or replace function public.audit_row() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -179,28 +179,28 @@ begin
   foreach t in array array['members','attendance','departments','events'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format($p$create policy %I on public.%I for select to authenticated
-      using (public.app_role() in ('admin','finance','secretary','viewer'))$p$, t || '_select', t);
+      using (public.app_role() in ('super_admin','admin','finance','secretary','viewer'))$p$, t || '_select', t);
     execute format($p$create policy %I on public.%I for insert to authenticated
-      with check (public.app_role() in ('admin','secretary'))$p$, t || '_insert', t);
+      with check (public.app_role() in ('super_admin','admin','secretary'))$p$, t || '_insert', t);
     execute format($p$create policy %I on public.%I for update to authenticated
-      using (public.app_role() in ('admin','secretary'))
-      with check (public.app_role() in ('admin','secretary'))$p$, t || '_update', t);
+      using (public.app_role() in ('super_admin','admin','secretary'))
+      with check (public.app_role() in ('super_admin','admin','secretary'))$p$, t || '_update', t);
     execute format($p$create policy %I on public.%I for delete to authenticated
-      using (public.app_role() = 'admin')$p$, t || '_delete', t);
+      using (public.app_role() in ('super_admin','admin'))$p$, t || '_delete', t);
   end loop;
 end $$;
 
 -- giving: financial data, only admin + finance
 alter table public.giving enable row level security;
 create policy giving_select on public.giving for select to authenticated
-  using (public.app_role() in ('admin','finance'));
+  using (public.app_role() in ('super_admin','admin','finance'));
 create policy giving_insert on public.giving for insert to authenticated
-  with check (public.app_role() in ('admin','finance'));
+  with check (public.app_role() in ('super_admin','admin','finance'));
 create policy giving_update on public.giving for update to authenticated
-  using (public.app_role() in ('admin','finance'))
-  with check (public.app_role() in ('admin','finance'));
+  using (public.app_role() in ('super_admin','admin','finance'))
+  with check (public.app_role() in ('super_admin','admin','finance'));
 create policy giving_delete on public.giving for delete to authenticated
-  using (public.app_role() = 'admin');
+  using (public.app_role() in ('super_admin','admin'));
 
 -- ---------- privileges (RLS above decides which rows) ----------
 revoke all on public.profiles, public.members, public.attendance, public.giving,

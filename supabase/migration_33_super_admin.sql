@@ -1,70 +1,64 @@
--- V33: Super Admin role
--- Promotes the existing technical owner from admin to super_admin while
--- preserving the normal admin role for day-to-day church operations.
-
--- The application uses app_role() for existing RLS policies. Returning
--- 'admin' for super_admin preserves the current admin capabilities while
--- the profile itself retains the real role for UI and privileged checks.
+-- Super Admin role: unrestricted application/database access.
+-- Safe to run on an existing church-management database.
 
 alter table public.profiles drop constraint if exists profiles_role_check;
-alter table public.profiles add constraint profiles_role_check
-  check (role in ('super_admin','admin','finance','secretary','viewer','member','pending'));
+alter table public.profiles
+  add constraint profiles_role_check
+  check (role in ('super_admin','admin','finance','secretary','viewer','pending'));
 
+-- Super Admin and legacy admin are both full administrators.
 create or replace function public.app_role() returns text
 language sql stable security definer set search_path = public as
-$$
-  select case when role = 'super_admin' then 'admin' else role end
-  from public.profiles where id = auth.uid()
-$$;
+$$ select case when role = 'super_admin' then 'admin' else role end from public.profiles where id = auth.uid() $$;
 
-revoke all on function public.app_role() from public, anon;
-grant execute on function public.app_role() to authenticated;
+-- Replace the policies with Super Admin-aware policies.
+drop policy if exists profiles_select on public.profiles;
+create policy profiles_select on public.profiles for select to authenticated
+  using (id = auth.uid() or public.app_role() in ('super_admin','admin'));
 
--- Only Super Admin may edit a Super Admin profile or assign the Super Admin role.
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated
-  using (
-    (select role from public.profiles where id = auth.uid()) = 'super_admin'
-    or (public.app_role() = 'admin' and role <> 'super_admin')
-  )
-  with check (
-    (select role from public.profiles where id = auth.uid()) = 'super_admin'
-    or (public.app_role() = 'admin' and role <> 'super_admin')
-  );
+  using (public.app_role() in ('super_admin','admin'))
+  with check (public.app_role() in ('super_admin','admin'));
 
--- Clear Test Data is a Super Admin operation. Existing app_role() compatibility
--- means the database still treats super_admin as admin for legacy RLS, while the
--- application and this explicit function check keep the destructive operation
--- restricted to super_admin.
-create or replace function public.clear_test_data()
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
+drop policy if exists audit_select on public.audit_log;
+create policy audit_select on public.audit_log for select to authenticated
+  using (public.app_role() in ('super_admin','admin'));
+
+do $$
+declare t text;
 begin
-  if (select role from public.profiles where id = auth.uid()) <> 'super_admin' then
-    raise exception 'Only the Super Admin can clear test data.' using errcode = '42501';
-  end if;
+  foreach t in array array['members','attendance','departments','events'] loop
+    execute format('drop policy if exists %I on public.%I', t || '_select', t);
+    execute format('drop policy if exists %I on public.%I', t || '_insert', t);
+    execute format('drop policy if exists %I on public.%I', t || '_update', t);
+    execute format('drop policy if exists %I on public.%I', t || '_delete', t);
 
-  update public.profiles set member_id = null where member_id is not null;
-  update public.profiles set branch_id = null where branch_id is not null;
+    execute format($p$create policy %I on public.%I for select to authenticated
+      using (public.app_role() in ('super_admin','admin','finance','secretary','viewer'))$p$, t || '_select', t);
+    execute format($p$create policy %I on public.%I for insert to authenticated
+      with check (public.app_role() in ('super_admin','admin','secretary'))$p$, t || '_insert', t);
+    execute format($p$create policy %I on public.%I for update to authenticated
+      using (public.app_role() in ('super_admin','admin','secretary'))
+      with check (public.app_role() in ('super_admin','admin','secretary'))$p$, t || '_update', t);
+    execute format($p$create policy %I on public.%I for delete to authenticated
+      using (public.app_role() in ('super_admin','admin'))$p$, t || '_delete', t);
+  end loop;
+end $$;
 
-  truncate table
-    public.audit_log, public.attendance, public.giving, public.offering_entries,
-    public.member_contributions, public.welfare_transactions, public.welfare_members,
-    public.attendance_headcount, public.visitors, public.groups, public.follow_ups,
-    public.prayer_requests, public.volunteers, public.service_plans, public.pastoral_cases,
-    public.event_registrations, public.announcements, public.families, public.children,
-    public.child_checkins, public.department_members, public.group_members,
-    public.group_attendance, public.volunteer_schedules, public.pledges,
-    public.payment_receipts, public.communication_templates, public.communication_queue,
-    public.finance_reconciliations, public.branches, public.notification_campaigns,
-    public.notification_logs, public.payment_requests, public.payment_webhook_events,
-    public.member_notification_preferences, public.members, public.departments, public.events
-    restart identity cascade;
-end;
-$$;
+drop policy if exists giving_select on public.giving;
+create policy giving_select on public.giving for select to authenticated
+  using (public.app_role() in ('super_admin','admin','finance'));
+drop policy if exists giving_insert on public.giving;
+create policy giving_insert on public.giving for insert to authenticated
+  with check (public.app_role() in ('super_admin','admin','finance'));
+drop policy if exists giving_update on public.giving;
+create policy giving_update on public.giving for update to authenticated
+  using (public.app_role() in ('super_admin','admin','finance'))
+  with check (public.app_role() in ('super_admin','admin','finance'));
+drop policy if exists giving_delete on public.giving;
+create policy giving_delete on public.giving for delete to authenticated
+  using (public.app_role() in ('super_admin','admin'));
 
-revoke all on function public.clear_test_data() from public, anon;
-grant execute on function public.clear_test_data() to authenticated;
+-- Existing admin accounts remain fully privileged. New accounts can now be
+-- explicitly assigned the super_admin role from the Users screen.

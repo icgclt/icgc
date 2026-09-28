@@ -108,7 +108,7 @@ Phone authentication must be enabled in Supabase Authentication > Providers > Ph
 - Member portal login uses the member's phone number as the username. Ghana numbers such as `0244457816` are normalized to `+233244457816` for Supabase Auth.
 - The portal function generates a temporary password and marks the account `must_change_password=true`. On first login, the member must set a new password before entering the church portal.
 - Creating/resetting a portal account again generates a new temporary password and forces another password change.
-- No email address is required for a member portal account. Email remains available for staff/admin accounts.
+- No email address is required for a member portal account. Email remains available for staff/admin / super_admin accounts.
 - Phone/password authentication is different from SMS/WhatsApp OTP. To enable member phone login, turn on **Authentication → Providers → Phone** in the Supabase dashboard. Do not enable an SMS provider unless you also want phone confirmation/OTP.
 - Deploy the updated Edge Function after copying this version:
 
