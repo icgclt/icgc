@@ -30,6 +30,11 @@ const memberIdCompare = (a, b) => {
   return ca.localeCompare(cb, undefined, { numeric: true, sensitivity: 'base' });
 };
 
+// Forgiving name key used to match attendance names to member records: ignores capitals, extra spaces,
+// punctuation, titles (Mr, Mrs, Rev ...) and word order, so "MRS ADINKRAH JOEL" matches "Joel Adinkrah".
+const NAME_TITLES = new Set(['mr', 'mrs', 'miss', 'ms', 'mad', 'madam', 'rev', 'dr', 'pastor', 'elder', 'deacon', 'deaconess', 'prophet', 'apostle', 'bro', 'sis', 'brother', 'sister', 'evangelist', 'evang', 'prof', 'hon']);
+const looseNameKey = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t) => t && !NAME_TITLES.has(t)).sort().join(' ');
+
 /* ---------------- Dashboard ---------------- */
 // Small Male / Female / Total table shared by the Active members and Last attendance cards.
 function GroupBreakdown({ rows }) {
@@ -68,14 +73,19 @@ export function Dashboard() {
   const byId = new Map(data.members.map((m) => [m.id, m]));
   const byName = new Map();
   data.members.forEach((m) => { const k = nameKey(m.name); if (k && !byName.has(k)) byName.set(k, m); });
+  const looseCount = new Map(), byLoose = new Map();
+  data.members.forEach((m) => { const k = looseNameKey(m.name); if (!k) return; looseCount.set(k, (looseCount.get(k) || 0) + 1); byLoose.set(k, m); });
+  const matchLoose = (name) => { const k = looseNameKey(name); return k && looseCount.get(k) === 1 ? byLoose.get(k) : undefined; };
   const childMember = new Map((data.children || []).filter((c) => c.member_id).map((c) => [c.id, c.member_id]));
   const presentBreakdown = GROUPS.map(([type, label]) => ({ label, type, male: 0, female: 0, none: 0, total: 0 }));
   const notLinked = { label: 'Not linked to a member', male: 0, female: 0, none: 0, total: 0 };
+  const notLinkedNames = [];
   presentRows.forEach((a) => {
-    const m = byId.get(a.member_id) || byId.get(childMember.get(a.child_id)) || byName.get(nameKey(a.person_name));
+    const m = byId.get(a.member_id) || byId.get(childMember.get(a.child_id)) || byName.get(nameKey(a.person_name)) || matchLoose(a.person_name);
     const row = m ? presentBreakdown.find((r) => r.type === (m.member_type || 'Adult')) || notLinked : notLinked;
     const key = m && m.gender === 'Male' ? 'male' : m && m.gender === 'Female' ? 'female' : 'none';
     row[key] += 1; row.total += 1;
+    if (!m) notLinkedNames.push(String(a.person_name || '(no name)').trim());
   });
   const presentTable = notLinked.total ? [...presentBreakdown, notLinked] : presentBreakdown;
   const upcoming = data.events.filter((e) => e.date >= today()).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
@@ -107,6 +117,12 @@ export function Dashboard() {
           <div className="num">{lastPresent}</div>
           <div className="muted sm">present</div>
           <GroupBreakdown rows={presentTable} />
+          {notLinkedNames.length > 0 && (
+            <div className="muted sm" style={{ marginTop: 10 }}>
+              <b>Not linked ({notLinkedNames.length}):</b> {notLinkedNames.slice(0, 40).join(', ')}{notLinkedNames.length > 40 ? ` and ${notLinkedNames.length - 40} more` : ''}.
+              <br />No member has this name. Correct the spelling in Attendance Records, or add the person under Members.
+            </div>
+          )}
         </div>
         <div className="card"><div className="label">New visitors</div><div className="num">{data.visitors.filter(v => v.visit_date === today()).length}</div><div className="muted sm">today</div></div>
         <div className="card"><div className="label">Open follow-ups</div><div className="num">{data.follow_ups.filter(f => f.status === 'Open' || f.status === 'In Progress').length}</div></div>
@@ -480,6 +496,7 @@ export function Attendance() {
 export function AbsenteeList() {
   const { data } = useData();
   const norm = (v) => String(v || '').trim().toLowerCase();
+  const nm = looseNameKey; // forgiving name key (titles, spelling case, word order)
   const GROUP_LABEL = { Adult: 'Adults', Omega: 'Omega', Child: 'Children' };
   const latestPresent = useMemo(() => data.attendance.filter((a) => a.status === 'Present').map((a) => a.date).sort().pop() || today(), [data.attendance]);
   const [date, setDate] = useState(latestPresent);
@@ -497,7 +514,7 @@ export function AbsenteeList() {
     rows.filter((a) => a.status === status).forEach((a) => {
       if (a.member_id) ids.add(a.member_id);
       if (a.child_id && childToMember.get(a.child_id)) ids.add(childToMember.get(a.child_id));
-      names.add(norm(a.person_name));
+      const k = nm(a.person_name); if (k) names.add(k);
     });
     return { ids, names };
   };
@@ -512,7 +529,7 @@ export function AbsenteeList() {
         const mid = childToMember.get(a.child_id);
         if (!byId.has(mid) || a.date > byId.get(mid)) byId.set(mid, a.date);
       }
-      const n = norm(a.person_name);
+      const n = nm(a.person_name);
       if (n && (!byName.has(n) || a.date > byName.get(n))) byName.set(n, a.date);
     });
     return { byId, byName };
@@ -525,22 +542,22 @@ export function AbsenteeList() {
     const markedAbsent = presentFor(dayRows, 'Absent');
     const needle = norm(q);
     const absent = activeMembers
-      .filter((m) => !present.ids.has(m.id) && !present.names.has(norm(m.name)))
+      .filter((m) => !present.ids.has(m.id) && !present.names.has(nm(m.name)))
       .filter((m) => !group || (m.member_type || 'Adult') === group)
       .filter((m) => !needle || norm(m.name).includes(needle) || norm(m.member_code).includes(needle) || norm(m.phone).includes(needle))
       .map((m) => {
         const own = m.phone || '';
         const parent = m.parent1_phone || m.parent2_phone || '';
-        const seen = [lastSeen.byId.get(m.id), lastSeen.byName.get(norm(m.name))].filter(Boolean).sort().pop() || '';
+        const seen = [lastSeen.byId.get(m.id), lastSeen.byName.get(nm(m.name))].filter(Boolean).sort().pop() || '';
         return {
           member: m, code: m.member_code || '', name: m.name, group: GROUP_LABEL[m.member_type || 'Adult'] || m.member_type,
           phone: own || parent, phoneNote: !own && parent ? ' (parent)' : '',
-          status: (markedAbsent.ids.has(m.id) || markedAbsent.names.has(norm(m.name))) ? 'Marked absent' : 'Not marked',
+          status: (markedAbsent.ids.has(m.id) || markedAbsent.names.has(nm(m.name))) ? 'Marked absent' : 'Not marked',
           lastSeen: seen,
         };
       })
       .sort((a, b) => memberIdCompare(a.member, b.member) || a.name.localeCompare(b.name));
-    return { absent, presentCount: activeMembers.filter((m) => present.ids.has(m.id) || present.names.has(norm(m.name))).length };
+    return { absent, presentCount: activeMembers.filter((m) => present.ids.has(m.id) || present.names.has(nm(m.name))).length };
   }, [dayRows, activeMembers, group, q, lastSeen]);
 
   const exportCsv = () => downloadCSV('absentees', result.absent.map((r) => ({
