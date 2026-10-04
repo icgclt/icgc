@@ -31,6 +31,21 @@ const memberIdCompare = (a, b) => {
 };
 
 /* ---------------- Dashboard ---------------- */
+// Small Male / Female / Total table shared by the Active members and Last attendance cards.
+function GroupBreakdown({ rows }) {
+  const showNone = rows.some((r) => r.none > 0);
+  return (
+    <div className="tablewrap" style={{ marginTop: 8 }}>
+      <table>
+        <thead><tr><th>Group</th><th>Male</th><th>Female</th>{showNone && <th>Not set</th>}<th>Total</th></tr></thead>
+        <tbody>
+          {rows.map((r) => <tr key={r.label}><td>{r.label}</td><td>{r.male}</td><td>{r.female}</td>{showNone && <td>{r.none}</td>}<td><b>{r.total}</b></td></tr>)}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const { data } = useData();
   const { profile } = useAuth();
@@ -44,9 +59,25 @@ export function Dashboard() {
     const male = countOf(type, 'Male'), female = countOf(type, 'Female'), none = countOf(type, null);
     return { label, male, female, none, total: male + female + none };
   });
-  const anyNoGender = breakdown.some((r) => r.none > 0);
   const lastDate = data.attendance.map((a) => a.date).sort().pop();
-  const lastPresent = data.attendance.filter((a) => a.date === lastDate && a.status === 'Present').length;
+  const presentRows = data.attendance.filter((a) => a.date === lastDate && a.status === 'Present');
+  const lastPresent = presentRows.length;
+  // Work out each present person's group and gender from their member record (directly, via the child
+  // record, or by matching the name). Anyone who cannot be matched is counted under "Not linked".
+  const nameKey = (v) => String(v || '').trim().toLowerCase();
+  const byId = new Map(data.members.map((m) => [m.id, m]));
+  const byName = new Map();
+  data.members.forEach((m) => { const k = nameKey(m.name); if (k && !byName.has(k)) byName.set(k, m); });
+  const childMember = new Map((data.children || []).filter((c) => c.member_id).map((c) => [c.id, c.member_id]));
+  const presentBreakdown = GROUPS.map(([type, label]) => ({ label, type, male: 0, female: 0, none: 0, total: 0 }));
+  const notLinked = { label: 'Not linked to a member', male: 0, female: 0, none: 0, total: 0 };
+  presentRows.forEach((a) => {
+    const m = byId.get(a.member_id) || byId.get(childMember.get(a.child_id)) || byName.get(nameKey(a.person_name));
+    const row = m ? presentBreakdown.find((r) => r.type === (m.member_type || 'Adult')) || notLinked : notLinked;
+    const key = m && m.gender === 'Male' ? 'male' : m && m.gender === 'Female' ? 'female' : 'none';
+    row[key] += 1; row.total += 1;
+  });
+  const presentTable = notLinked.total ? [...presentBreakdown, notLinked] : presentBreakdown;
   const upcoming = data.events.filter((e) => e.date >= today()).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
   const recent = [...data.members].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 5);
 
@@ -69,17 +100,14 @@ export function Dashboard() {
           </div>
           <div className="num">{pool.length}</div>
           <div className="muted sm">{active} active · {data.members.length} on the register (all statuses)</div>
-          <div className="tablewrap" style={{ marginTop: 8 }}>
-            <table>
-              <thead><tr><th>Group</th><th>Male</th><th>Female</th>{anyNoGender && <th>Not set</th>}<th>Total</th></tr></thead>
-              <tbody>
-                {breakdown.map((r) => <tr key={r.label}><td>{r.label}</td><td>{r.male}</td><td>{r.female}</td>{anyNoGender && <td>{r.none}</td>}<td><b>{r.total}</b></td></tr>)}
-              </tbody>
-            </table>
-          </div>
+          <GroupBreakdown rows={breakdown} />
         </div>
-        <div className="card"><div className="label">Last attendance{lastDate ? ` (${lastDate})` : ''}</div><div className="num">{lastPresent}</div><div className="muted sm">present</div></div>
-        <div className="card"><div className="label">Departments</div><div className="num">{data.departments.length}</div></div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div className="label">Last attendance{lastDate ? ` (${lastDate})` : ''}</div>
+          <div className="num">{lastPresent}</div>
+          <div className="muted sm">present</div>
+          <GroupBreakdown rows={presentTable} />
+        </div>
         <div className="card"><div className="label">New visitors</div><div className="num">{data.visitors.filter(v => v.visit_date === today()).length}</div><div className="muted sm">today</div></div>
         <div className="card"><div className="label">Open follow-ups</div><div className="num">{data.follow_ups.filter(f => f.status === 'Open' || f.status === 'In Progress').length}</div></div>
       </div>
