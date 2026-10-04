@@ -1,26 +1,50 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth, can, ROLES, isSuperAdmin } from './auth';
+import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
 import { useData, TABLES } from './data';
 import { supabase } from './supabase';
-import Crud from './Crud';
+import Crud, { StoragePhoto } from './Crud';
 import { money, today, downloadCSV, download, parseCSV, uuid } from './utils';
 
-const STATUS = ['Active', 'Inactive', 'Visitor'];
-const SERVICES = ['Sunday Service', 'Midweek Service', 'Prayer Meeting', 'Other'];
+const STATUS = ['Active', 'Inactive', 'Visitor', 'Left'];
+const SERVICES = ['Sunday Service', 'Bible Study', 'Prayer Meeting', 'Special Program', 'Other'];
 const OFFERING_CATEGORIES = ['Main Offering', 'Project Offering', "Children's Offering", 'First Fruit', 'Weekday Offering', 'Donation', 'Thanksgiving', 'Pledges'];
 const HEADCOUNT_CATEGORIES = ['Children Boys', 'Children Girls', 'Youth Boys', 'Youth Girls', 'Adult Men', 'Adult Women'];
 const headcountLabel = (cat) => cat.replace('Youth Boys', 'Omega Boys').replace('Youth Girls', 'Omega Girls');
 const badge = (v) => <span className="badge">{v}</span>;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+const dayName = (iso) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long' }) : '';
+// Member IDs start with the church's letters: adults <P>A, Omega <P>O, children <P>C (e.g. TTA1 for Testimony Temple).
+// Set VITE_MEMBER_CODE_PREFIX to give another church its own letters. The default keeps the existing "TT".
+const MEMBER_PREFIX = (import.meta.env.VITE_MEMBER_CODE_PREFIX || 'TT').toUpperCase();
+const [PFX_ADULT, PFX_OMEGA, PFX_CHILD] = [`${MEMBER_PREFIX}A`, `${MEMBER_PREFIX}O`, `${MEMBER_PREFIX}C`];
+const PFX_RE = new RegExp(`^(${PFX_ADULT}|${PFX_OMEGA}|${PFX_CHILD})`);
+const PFX_NUM_RE = new RegExp(`^(${PFX_ADULT}|${PFX_OMEGA}|${PFX_CHILD})(\\d+)$`);
+const memberIdCompare = (a, b) => {
+  const rank = (code) => { const p = String(code || '').toUpperCase().match(PFX_RE)?.[1]; return p === PFX_ADULT ? 0 : p === PFX_OMEGA ? 1 : p === PFX_CHILD ? 2 : 9; };
+  const ca = String(a.member_code || '').toUpperCase(), cb = String(b.member_code || '').toUpperCase();
+  const ra = rank(ca), rb = rank(cb);
+  if (ra !== rb) return ra - rb;
+  const ma = ca.match(PFX_NUM_RE), mb = cb.match(PFX_NUM_RE);
+  if (ma && mb && ma[1] === mb[1]) return Number(ma[2]) - Number(mb[2]);
+  return ca.localeCompare(cb, undefined, { numeric: true, sensitivity: 'base' });
+};
+
 /* ---------------- Dashboard ---------------- */
 export function Dashboard() {
   const { data } = useData();
-  const { role, profile } = useAuth();
-  const showGiving = can(role, 'giving', 'read');
-  const month = today().slice(0, 7);
-  const monthGiving = data.offering_entries.filter((g) => String(g.date).startsWith(month)).reduce((a, g) => a + Number(g.amount), 0);
+  const { profile } = useAuth();
+  const [basis, setBasis] = useState('Active'); // which members the breakdown counts: 'Active' or 'All'
   const active = data.members.filter((m) => m.status === 'Active').length;
+  const pool = basis === 'Active' ? data.members.filter((m) => m.status === 'Active') : data.members;
+  const GROUPS = [['Adult', 'Adults'], ['Omega', 'Omega'], ['Child', 'Children']];
+  const countOf = (type, gender) => pool.filter((m) => (m.member_type || 'Adult') === type
+    && (gender ? m.gender === gender : m.gender !== 'Male' && m.gender !== 'Female')).length;
+  const breakdown = GROUPS.map(([type, label]) => {
+    const male = countOf(type, 'Male'), female = countOf(type, 'Female'), none = countOf(type, null);
+    return { label, male, female, none, total: male + female + none };
+  });
+  const anyNoGender = breakdown.some((r) => r.none > 0);
   const lastDate = data.attendance.map((a) => a.date).sort().pop();
   const lastPresent = data.attendance.filter((a) => a.date === lastDate && a.status === 'Present').length;
   const upcoming = data.events.filter((e) => e.date >= today()).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
@@ -35,9 +59,26 @@ export function Dashboard() {
         </div>
       </div>
       <div className="cards">
-        <div className="card"><div className="label">Active members</div><div className="num">{active}</div><div className="muted sm">{data.members.length} total</div></div>
+        <div className="card" style={{ gridColumn: 'span 2' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div className="label">{basis === 'Active' ? 'Active members' : 'All members'}</div>
+            <div className="tabs" style={{ margin: 0 }}>
+              <button type="button" className={`tab${basis === 'Active' ? ' active' : ''}`} style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => setBasis('Active')}>Active</button>
+              <button type="button" className={`tab${basis === 'All' ? ' active' : ''}`} style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => setBasis('All')}>All</button>
+            </div>
+          </div>
+          <div className="num">{pool.length}</div>
+          <div className="muted sm">{active} active · {data.members.length} on the register (all statuses)</div>
+          <div className="tablewrap" style={{ marginTop: 8 }}>
+            <table>
+              <thead><tr><th>Group</th><th>Male</th><th>Female</th>{anyNoGender && <th>Not set</th>}<th>Total</th></tr></thead>
+              <tbody>
+                {breakdown.map((r) => <tr key={r.label}><td>{r.label}</td><td>{r.male}</td><td>{r.female}</td>{anyNoGender && <td>{r.none}</td>}<td><b>{r.total}</b></td></tr>)}
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div className="card"><div className="label">Last attendance{lastDate ? ` (${lastDate})` : ''}</div><div className="num">{lastPresent}</div><div className="muted sm">present</div></div>
-        {showGiving && <div className="card"><div className="label">Offering this month</div><div className="num" style={{ fontSize: 22 }}>{money(monthGiving)}</div></div>}
         <div className="card"><div className="label">Departments</div><div className="num">{data.departments.length}</div></div>
         <div className="card"><div className="label">New visitors</div><div className="num">{data.visitors.filter(v => v.visit_date === today()).length}</div><div className="muted sm">today</div></div>
         <div className="card"><div className="label">Open follow-ups</div><div className="num">{data.follow_ups.filter(f => f.status === 'Open' || f.status === 'In Progress').length}</div></div>
@@ -52,7 +93,7 @@ export function Dashboard() {
         <div className="panel">
           <h2>Upcoming events</h2>
           {upcoming.length ? upcoming.map((e) => (
-            <p key={e.id}><b>{e.title}</b><br /><span className="muted">{e.date}{e.event_time ? ` · ${e.event_time}` : ''}{e.location ? ` · ${e.location}` : ''}</span></p>
+            <p key={e.id}><b>{e.title}</b><br /><span className="muted">{e.date} · {dayName(e.date)}{e.event_time ? ` · ${e.event_time}` : ''}{e.location ? ` · ${e.location}` : ''}</span></p>
           )) : <div className="empty">No upcoming events.</div>}
         </div>
       </div>
@@ -63,18 +104,8 @@ export function Dashboard() {
 /* ---------------- Modules (all use the generic Crud component) ---------------- */
 const MEMBER_CSV_FIELDS = ['member_code', 'name', 'phone', 'email', 'dob', 'gender', 'member_type', 'grp', 'status', 'address', 'parent1_name', 'parent1_phone', 'parent1_relationship', 'parent2_name', 'parent2_phone', 'parent2_relationship', 'notes'];
 
-function normalizeGhanaPhone(value) {
-  const raw = String(value ?? '').trim();
-  if (!raw) return '';
-  const digits = raw.replace(/\D/g, '');
-  if (raw.startsWith('+233')) return `+233${digits.slice(-9)}`;
-  if (digits.startsWith('233') && digits.length >= 12) return `0${digits.slice(-9)}`;
-  if (digits.length === 9) return `0${digits}`;
-  return raw;
-}
-
 function MemberImport() {
-  const { data, syncNow } = useData();
+  const { data, save } = useData();
   const { role } = useAuth();
   const fileRef = useRef(null);
   const [msg, setMsg] = useState(null);
@@ -89,131 +120,61 @@ function MemberImport() {
     e.target.value = '';
     if (!file) return;
     setBusy(true);
-    setMsg(null);
     try {
-      // Read the authoritative database state directly. React state can still contain the
-      // previous render immediately after syncNow(), so the importer must not allocate IDs
-      // from a stale closure.
-      await syncNow();
-      const { data: serverMembersBefore, error: membersReadError } = await supabase.from('members').select('*');
-      if (membersReadError) throw new Error(`Could not read current members: ${membersReadError.message}`);
-      const { data: freshHistory, error: historyReadError } = await supabase.from('member_group_history').select('from_member_code,to_member_code');
-      if (historyReadError) throw new Error(`Could not read member ID history: ${historyReadError.message}`);
-      const { data: freshChildren, error: childrenReadError } = await supabase.from('children').select('*');
-      if (childrenReadError) throw new Error(`Could not read children: ${childrenReadError.message}`);
-      const freshMembers = serverMembersBefore || [];
       const rows = parseCSV(await file.text());
-      if (!rows.length) throw new Error('No rows found. The file must have a header row plus at least one member.');
-
-      const byName = new Map(freshMembers.map((m) => [String(m.name || '').trim().toLowerCase(), m]));
-      const usedCodes = new Set([
-        ...freshMembers.map(m => String(m.member_code || '').trim().toUpperCase()).filter(Boolean),
-        ...freshHistory.flatMap(h => [h.from_member_code, h.to_member_code]).map(c => String(c || '').trim().toUpperCase()).filter(Boolean),
-      ]);
-      const allocateCode = (type) => {
-        const prefix = type === 'Child' ? 'TTC' : type === 'Omega' ? 'TTO' : 'TTA';
-        let n = 1;
-        while (usedCodes.has(prefix + n)) n++;
-        const code = prefix + n;
-        usedCodes.add(code);
-        return code;
-      };
-
-      const membersToUpsert = [];
-      const childrenToUpsert = [];
-      let skipped = 0;
-      let added = 0;
-      let updated = 0;
-
+      if (!rows.length) { setMsg({ ok: false, text: 'No rows found in that file — check it has a header row plus at least one member.' }); return; }
+      const byName = new Map(data.members.map((m) => [m.name.trim().toLowerCase(), m]));
+      let added = 0, updated = 0, skipped = 0;
       for (const r of rows) {
-        const name = String(r.name || '').trim();
+        const name = (r.name || '').trim();
         if (!name) { skipped++; continue; }
-        const key = name.toLowerCase();
-        const match = byName.get(key);
-        const memberType = ['Adult', 'Omega', 'Child'].includes(String(r.member_type || '').trim())
-          ? String(r.member_type).trim()
-          : (match?.member_type || 'Adult');
-        const memberCode = String(r.member_code || '').trim().toUpperCase() || match?.member_code || allocateCode(memberType);
-
-        if (usedCodes.has(memberCode) && memberCode !== String(match?.member_code || '').trim().toUpperCase()) {
-          // The code belongs to another member. Do not silently overwrite that member.
-          throw new Error(`Duplicate member ID ${memberCode} in the import for ${name}. Remove the ID or correct the row.`);
-        }
-        usedCodes.add(memberCode);
-
-        const id = match?.id || uuid();
+        const match = byName.get(name.toLowerCase());
+        const status = r.status || match?.status || 'Active';
+        const memberType = ['Adult','Omega','Child'].includes(r.member_type) ? r.member_type : (match?.member_type || 'Adult');
+        const memberCode = (match?.member_code || nextMemberCode(data.members, memberType, data.member_group_history)).trim();
+        const duplicate = data.members.find(m => String(m.member_code || '').trim().toLowerCase() === memberCode.toLowerCase() && m.id !== match?.id);
+        if (duplicate) { skipped++; continue; }
+        const importId = match ? match.id : uuid();
         const importedMember = {
-          id,
+          id: importId,
           member_code: memberCode,
           name,
-          phone: normalizeGhanaPhone(r.phone || match?.phone || ''),
+          phone: r.phone || match?.phone || '',
           email: r.email || match?.email || '',
           dob: r.dob || match?.dob || null,
           gender: r.gender || match?.gender || null,
           member_type: memberType,
           grp: r.grp || r.group || match?.grp || '',
-          status: STATUS.includes(r.status) ? r.status : (match?.status || 'Active'),
+          status: STATUS.includes(status) ? status : 'Active',
           address: r.address || match?.address || '',
           parent1_name: r.parent1_name || match?.parent1_name || '',
-          parent1_phone: normalizeGhanaPhone(r.parent1_phone || match?.parent1_phone || ''),
+          parent1_phone: r.parent1_phone || match?.parent1_phone || '',
           parent1_relationship: r.parent1_relationship || match?.parent1_relationship || '',
           parent2_name: r.parent2_name || match?.parent2_name || '',
-          parent2_phone: normalizeGhanaPhone(r.parent2_phone || match?.parent2_phone || ''),
+          parent2_phone: r.parent2_phone || match?.parent2_phone || '',
           parent2_relationship: r.parent2_relationship || match?.parent2_relationship || '',
           notes: r.notes || match?.notes || '',
         };
-        membersToUpsert.push(importedMember);
-        byName.set(key, importedMember);
-        match ? updated++ : added++;
-
+        save('members', importedMember);
         if (memberType === 'Child') {
-          const existingChild = freshChildren.find(c => c.member_id === id);
-          childrenToUpsert.push({
+          const existingChild = (data.children || []).find(c => c.member_id === importId);
+          save('children', {
             ...(existingChild || {}),
             id: existingChild?.id || uuid(),
-            member_id: id,
+            member_id: importId,
             name,
             dob: importedMember.dob || null,
             gender: importedMember.gender || null,
             guardian_name: [importedMember.parent1_name, importedMember.parent2_name].filter(Boolean).join(' / '),
             guardian_phone: [importedMember.parent1_phone, importedMember.parent2_phone].filter(Boolean).join(' / '),
-            pickup_notes: existingChild?.pickup_notes || '',
-            medical_notes: existingChild?.medical_notes || '',
-            status: importedMember.status === 'Inactive' ? 'Inactive' : 'Active',
+            status: ['Inactive', 'Left'].includes(importedMember.status) ? 'Inactive' : 'Active',
           });
         }
+        match ? updated++ : added++;
       }
-
-      // Write the whole member import as one PostgREST statement. This avoids a successful
-      // first batch followed by a failed second batch leaving a half-imported file.
-      const { data: serverMembers, error: memberWriteError } = await supabase
-        .from('members')
-        .upsert(membersToUpsert, { onConflict: 'id' })
-        .select('*');
-      if (memberWriteError) throw new Error(`Member import failed: ${memberWriteError.message}`);
-
-      if (childrenToUpsert.length) {
-        const { error: childWriteError } = await supabase
-          .from('children')
-          .upsert(childrenToUpsert, { onConflict: 'id' })
-          .select('*');
-        if (childWriteError) throw new Error(`Children import failed: ${childWriteError.message}`);
-      }
-
-      // Confirm the imported IDs exist on the server before refreshing the application cache.
-      const importedIds = serverMembers.map(m => m.id);
-      const { data: confirmed, error: confirmError } = await supabase.from('members').select('id,member_code,name').in('id', importedIds);
-      if (confirmError) throw new Error(`Database confirmation failed: ${confirmError.message}`);
-      if ((confirmed || []).length !== importedIds.length) {
-        throw new Error(`Database confirmation failed: ${confirmed?.length || 0} of ${importedIds.length} imported members were found on the server.`);
-      }
-
-      // Pull the confirmed database state into the app. This prevents the old optimistic/local
-      // cache from making an import appear successful and then disappear later.
-      await syncNow();
-      setMsg({ ok: true, text: `Import complete — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ''}. Database confirmed ${confirmed.length} member records.` });
+      setMsg({ ok: true, text: `Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped.` : ''}.` });
     } catch (err) {
-      setMsg({ ok: false, text: err?.message || 'Import failed. No success message was recorded.' });
+      setMsg({ ok: false, text: 'Could not read that file. Make sure it is a plain CSV export.' });
     } finally {
       setBusy(false);
     }
@@ -232,7 +193,7 @@ function MemberImport() {
       </div>
       <p className="muted sm">
         CSV columns: <code>{MEMBER_CSV_FIELDS.join(', ')}</code>. Matching by name — a row whose name already
-        exists updates that member instead of creating a duplicate. Phone numbers are preserved as Ghana local numbers.
+        exists updates that member instead of creating a duplicate.
       </p>
       {msg && <div className={msg.ok ? 'muted' : 'err'} style={{ marginTop: 8 }}>{msg.text}</div>}
     </div>
@@ -240,7 +201,7 @@ function MemberImport() {
 }
 
 function nextMemberCode(members, memberType, history = []) {
-  const prefix = memberType === 'Child' ? 'TTC' : memberType === 'Omega' ? 'TTO' : 'TTA';
+  const prefix = memberType === 'Child' ? PFX_CHILD : memberType === 'Omega' ? PFX_OMEGA : PFX_ADULT;
   let max = 0;
   const codes = [
     ...(members || []).map(m => m.member_code),
@@ -257,12 +218,48 @@ function nextMemberCode(members, memberType, history = []) {
 
 function PortalAccountLauncher({ members, onCreate }) {
   const [q, setQ] = useState('');
-  const matches = (members || []).filter(m => m.status !== 'Inactive' && (!q.trim() || `${m.name} ${m.member_code || ''} ${m.phone || ''}`.toLowerCase().includes(q.trim().toLowerCase()))).slice(0, 12);
   const [selected, setSelected] = useState('');
-  const member = members.find(m => m.id === selected);
-  return <div className="toolbar">
-    <input placeholder="Search member by name, ID or phone…" value={q} onChange={e=>{setQ(e.target.value);setSelected('')}} />
-    <select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">Select member</option>{matches.map(m=><option key={m.id} value={m.id}>{m.member_code || 'No ID'} · {m.name}{m.phone ? ` · ${m.phone}` : ''}</option>)}</select>
+  const activeMembers = (members || []).filter(m => !['Inactive', 'Left'].includes(m.status));
+  const term = q.trim().toLowerCase();
+  const matches = activeMembers
+    .filter(m => !term || `${m.name || ''} ${m.member_code || ''} ${m.phone || ''}`.toLowerCase().includes(term))
+    .sort((a, b) => String(a.member_code || '').localeCompare(String(b.member_code || ''), undefined, { numeric: true, sensitivity: 'base' }))
+    .slice(0, 12);
+  const member = activeMembers.find(m => m.id === selected);
+
+  function chooseMember(m) {
+    setSelected(m.id);
+    setQ(`${m.member_code || ''} · ${m.name}`.trim());
+  }
+
+  function changeSearch(value) {
+    setQ(value);
+    if (selected) {
+      const selectedMember = activeMembers.find(m => m.id === selected);
+      const selectedText = selectedMember ? `${selectedMember.member_code || ''} ${selectedMember.name || ''} ${selectedMember.phone || ''}`.toLowerCase() : '';
+      if (!selectedMember || !selectedText.includes(value.trim().toLowerCase())) setSelected('');
+    }
+  }
+
+  return <div className="portal-account-launcher">
+    <div style={{position:'relative'}}>
+      <input
+        placeholder="Search member by name, ID or phone…"
+        value={q}
+        onChange={e=>changeSearch(e.target.value)}
+        autoComplete="off"
+      />
+      {q.trim() && !member && <div className="panel" style={{position:'absolute',zIndex:20,left:0,right:0,top:'calc(100% + 4px)',margin:0,padding:4,maxHeight:260,overflowY:'auto',boxShadow:'0 8px 24px rgba(0,0,0,.15)'}}>
+        {matches.length ? matches.map(m => (
+          <button key={m.id} type="button" onClick={()=>chooseMember(m)} style={{display:'block',width:'100%',textAlign:'left',border:0,background:'transparent',padding:'8px 10px',cursor:'pointer',borderRadius:6}}>
+            <b>{m.member_code || 'No ID'}</b> · {m.name}{m.phone ? <span className="muted"> · {m.phone}</span> : ''}
+          </button>
+        )) : <div className="muted sm" style={{padding:8}}>No matching active member.</div>}
+      </div>}
+    </div>
+    <div className="panel" style={{margin:0,minHeight:42,padding:'9px 12px'}}>
+      {member ? <><b>{member.member_code || 'No ID'} · {member.name}</b><div className="muted sm">{member.phone || 'No phone number'}</div></> : <span className="muted">Select a member from the search results.</span>}
+    </div>
     <button className="primary" disabled={!member || !member.phone} onClick={()=>onCreate(member)}>Create / Reset Portal Password</button>
   </div>;
 }
@@ -294,7 +291,7 @@ export function Members() {
         guardian_phone: [record.parent1_phone, record.parent2_phone].filter(Boolean).join(' / '),
         pickup_notes: existingChild?.pickup_notes || '',
         medical_notes: existingChild?.medical_notes || '',
-        status: record.status === 'Inactive' ? 'Inactive' : 'Active',
+        status: ['Inactive', 'Left'].includes(record.status) ? 'Inactive' : 'Active',
       };
       save('children', child);
     } else if (original?.member_type === 'Child' && existingChild) {
@@ -312,7 +309,7 @@ export function Members() {
       </div>
       <Crud
         table="members" title="Members" noun="member"
-        sortKey="name" searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
+        sortKey="member_code" sortCompare={memberIdCompare} searchKeys={['name', 'member_code', 'phone', 'grp', 'email']}
         prepareRecord={(record, original) => {
           const oldType = original?.member_type || 'Adult';
           const newType = record.member_type || 'Adult';
@@ -338,6 +335,7 @@ export function Members() {
         fields={[
           { key: 'member_code', label: 'Unique Member ID (automatic)', readOnly: true, unique: true, placeholder: 'Assigned automatically' },
           { key: 'name', label: 'Name', required: true },
+          { key: 'photo_url', label: 'Passport Photo', type: 'photo', bucket: 'member-photos', maxWidth: 300, maxHeight: 400, quality: 0.78 },
           { key: 'phone', label: 'Phone', type: 'tel' },
           { key: 'email', label: 'Email', type: 'email' },
           { key: 'dob', label: 'Date of birth', type: 'date' },
@@ -449,6 +447,119 @@ export function Attendance() {
   );
 }
 
+// Absentee list: active members who were not marked Present on the chosen date (and service),
+// with phone numbers for follow-up. Children without their own number show a parent's number.
+export function AbsenteeList() {
+  const { data } = useData();
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  const GROUP_LABEL = { Adult: 'Adults', Omega: 'Omega', Child: 'Children' };
+  const latestPresent = useMemo(() => data.attendance.filter((a) => a.status === 'Present').map((a) => a.date).sort().pop() || today(), [data.attendance]);
+  const [date, setDate] = useState(latestPresent);
+  const [service, setService] = useState('');
+  const [group, setGroup] = useState('');
+  const [q, setQ] = useState('');
+
+  const servicesThatDay = useMemo(() => [...new Set(data.attendance.filter((a) => a.date === date).map((a) => a.service))].filter(Boolean), [data.attendance, date]);
+  const dayRows = useMemo(() => data.attendance.filter((a) => a.date === date && (!service || a.service === service)), [data.attendance, date, service]);
+
+  // Children's quick attendance records the child's own id; map it back to the member record.
+  const childToMember = useMemo(() => new Map((data.children || []).filter((c) => c.member_id).map((c) => [c.id, c.member_id])), [data.children]);
+  const presentFor = (rows, status) => {
+    const ids = new Set(), names = new Set();
+    rows.filter((a) => a.status === status).forEach((a) => {
+      if (a.member_id) ids.add(a.member_id);
+      if (a.child_id && childToMember.get(a.child_id)) ids.add(childToMember.get(a.child_id));
+      names.add(norm(a.person_name));
+    });
+    return { ids, names };
+  };
+
+  // Most recent date each person was present (on or before the chosen date).
+  const lastSeen = useMemo(() => {
+    const byId = new Map(), byName = new Map();
+    data.attendance.forEach((a) => {
+      if (a.status !== 'Present' || a.date > date) return;
+      if (a.member_id && (!byId.has(a.member_id) || a.date > byId.get(a.member_id))) byId.set(a.member_id, a.date);
+      if (a.child_id && childToMember.get(a.child_id)) {
+        const mid = childToMember.get(a.child_id);
+        if (!byId.has(mid) || a.date > byId.get(mid)) byId.set(mid, a.date);
+      }
+      const n = norm(a.person_name);
+      if (n && (!byName.has(n) || a.date > byName.get(n))) byName.set(n, a.date);
+    });
+    return { byId, byName };
+  }, [data.attendance, childToMember, date]);
+
+  const activeMembers = useMemo(() => data.members.filter((m) => m.status === 'Active'), [data.members]);
+  const result = useMemo(() => {
+    if (!dayRows.length) return { absent: [], presentCount: 0 };
+    const present = presentFor(dayRows, 'Present');
+    const markedAbsent = presentFor(dayRows, 'Absent');
+    const needle = norm(q);
+    const absent = activeMembers
+      .filter((m) => !present.ids.has(m.id) && !present.names.has(norm(m.name)))
+      .filter((m) => !group || (m.member_type || 'Adult') === group)
+      .filter((m) => !needle || norm(m.name).includes(needle) || norm(m.member_code).includes(needle) || norm(m.phone).includes(needle))
+      .map((m) => {
+        const own = m.phone || '';
+        const parent = m.parent1_phone || m.parent2_phone || '';
+        const seen = [lastSeen.byId.get(m.id), lastSeen.byName.get(norm(m.name))].filter(Boolean).sort().pop() || '';
+        return {
+          member: m, code: m.member_code || '', name: m.name, group: GROUP_LABEL[m.member_type || 'Adult'] || m.member_type,
+          phone: own || parent, phoneNote: !own && parent ? ' (parent)' : '',
+          status: (markedAbsent.ids.has(m.id) || markedAbsent.names.has(norm(m.name))) ? 'Marked absent' : 'Not marked',
+          lastSeen: seen,
+        };
+      })
+      .sort((a, b) => memberIdCompare(a.member, b.member) || a.name.localeCompare(b.name));
+    return { absent, presentCount: activeMembers.filter((m) => present.ids.has(m.id) || present.names.has(norm(m.name))).length };
+  }, [dayRows, activeMembers, group, q, lastSeen]);
+
+  const exportCsv = () => downloadCSV('absentees', result.absent.map((r) => ({
+    'Member ID': r.code, Name: r.name, Group: r.group, Phone: r.phone ? r.phone + r.phoneNote : '', Status: r.status, 'Last present': r.lastSeen, Date: date, Service: service || 'All services',
+  })));
+
+  return (
+    <>
+      <div className="top"><div><h1>Absentee List</h1><div className="muted">Active members not marked present on the chosen day, with phone numbers for follow-up.</div></div>
+        <button className="secondary" disabled={!result.absent.length} onClick={exportCsv}>Download CSV</button></div>
+      <div className="panel">
+        <div className="toolbar">
+          <label>Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+          <label>Service<select value={service} onChange={(e) => setService(e.target.value)}>
+            <option value="">All services</option>
+            {servicesThatDay.map((x) => <option key={x} value={x}>{x}</option>)}
+          </select></label>
+          <label>Group<select value={group} onChange={(e) => setGroup(e.target.value)}>
+            <option value="">All groups</option><option value="Adult">Adults</option><option value="Omega">Omega</option><option value="Child">Children</option>
+          </select></label>
+          <input placeholder="Search name, member ID or phone" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        {!dayRows.length ? (
+          <div className="empty">No attendance was recorded on {date}{service ? ` for ${service}` : ''}, so there is nothing to compare. Pick a day when attendance was taken.</div>
+        ) : (
+          <>
+            <p className="muted" style={{ marginTop: 0 }}><b>{result.absent.length}</b> absent · {result.presentCount} present · {activeMembers.length} active members{(group || q) ? ' (list is filtered)' : ''}</p>
+            <div className="tablewrap"><table>
+              <thead><tr><th>#</th><th>Member ID</th><th>Name</th><th>Group</th><th>Phone</th><th>Status</th><th>Last present</th></tr></thead>
+              <tbody>
+                {result.absent.map((r, i) => (
+                  <tr key={r.member.id}>
+                    <td>{i + 1}</td><td>{r.code}</td><td><b>{r.name}</b></td><td>{r.group}</td>
+                    <td>{r.phone ? <a href={`tel:${r.phone}`}>{r.phone}</a> : <span className="muted">No phone</span>}{r.phoneNote && <span className="muted sm">{r.phoneNote}</span>}</td>
+                    <td>{r.status}</td><td>{r.lastSeen || <span className="muted">Never</span>}</td>
+                  </tr>
+                ))}
+                {!result.absent.length && <tr><td colSpan="7" className="empty">Everyone matching these filters was present.</td></tr>}
+              </tbody>
+            </table></div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 // Tap-to-cycle attendance sheet: one screen, one tap per member, no per-person forms.
 // Cycle per tap: unmarked -> Present -> Absent -> unmarked. Loads existing marks for the
 // chosen date+service so re-opening a sheet lets you correct it rather than duplicate it.
@@ -460,7 +571,7 @@ export function QuickAttendance() {
   const [marks, setMarks] = useState({});
 
   const members = useMemo(
-    () => [...data.members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name)),
+    () => [...data.members].filter((m) => !['Inactive', 'Left'].includes(m.status)).sort((a, b) => a.name.localeCompare(b.name)),
     [data.members],
   );
 
@@ -657,7 +768,7 @@ export function Events() {
     <div className="top"><div><h1>Events</h1><div className="muted">Create one-time events or recurring weekly events.</div></div>{canWrite && <button className="primary" onClick={()=>open()}>+ Add event</button>}</div>
     <div className="panel"><div className="toolbar"><input placeholder="Search events" value={q} onChange={e=>setQ(e.target.value)} /></div></div>
     <div className="panel"><div className="tablewrap"><table><thead><tr><th>Date</th><th>Event</th><th>Time</th><th>Location</th><th>Repeat</th><th></th></tr></thead><tbody>
-      {rows.map(e=><tr key={e.id}><td>{e.date}</td><td><b>{e.title}</b><br/><small>{e.description}</small></td><td>{e.event_time||''}</td><td>{e.location||''}</td><td>{e.recurrence==='weekly' ? `Weekly until ${e.recurrence_end_date}` : 'One-time'}</td><td>{canWrite&&<button onClick={()=>open(e)}>Edit</button>} {canDel&&<button className="danger" onClick={()=>remove('events',e.id)}>Delete</button>}</td></tr>)}
+      {rows.map(e=><tr key={e.id}><td><b>{e.date}</b><br/><small>{dayName(e.date)}</small></td><td><b>{e.title}</b><br/><small>{e.description}</small></td><td>{e.event_time||''}</td><td>{e.location||''}</td><td>{e.recurrence==='weekly' ? `Weekly until ${e.recurrence_end_date}` : 'One-time'}</td><td>{canWrite&&<button onClick={()=>open(e)}>Edit</button>} {canDel&&<button className="danger" onClick={()=>remove('events',e.id)}>Delete</button>}</td></tr>)}
       {!rows.length&&<tr><td colSpan="6" className="empty">No events.</td></tr>}
     </tbody></table></div></div>
     {form && <div className="modal"><form className="modalcard" onSubmit={submit}><h2>{form.original?'Edit event':'Add event'}</h2>
@@ -692,7 +803,7 @@ export function EventAttendance() {
   const registrations = useMemo(() => (data.event_registrations || []).filter(r => r.event_id === eventId), [data.event_registrations, eventId]);
   const registeredIds = useMemo(() => new Set(registrations.map(r => r.member_id)), [registrations]);
   const members = useMemo(() => {
-    const base = [...(data.members || [])].filter(m => m.status !== 'Inactive');
+    const base = [...(data.members || [])].filter(m => !['Inactive', 'Left'].includes(m.status));
     return registrations.length ? base.filter(m => registeredIds.has(m.id)) : base;
   }, [data.members, registrations.length, registeredIds]);
 
@@ -704,21 +815,50 @@ export function EventAttendance() {
     setStatusMap(next);
   }, [eventId, data.attendance]);
 
-  const toggle = (id) => setStatusMap(m => ({...m, [id]: m[id] === 'Present' ? 'Absent' : 'Present'}));
-  const markAll = (status) => { const next = {}; members.forEach(m => { next[m.id] = status; }); setStatusMap(next); };
+  const dailyAttendanceMap = useMemo(() => {
+    const map = new Map();
+    if (!event) return map;
+    (data.attendance || []).filter(a => String(a.date || '').slice(0,10) === String(event.date || '').slice(0,10)).forEach(a => {
+      if (a.member_id && !map.has(a.member_id)) map.set(a.member_id, a);
+    });
+    return map;
+  }, [data.attendance, event]);
+  const toggle = (id) => {
+    const existingToday = dailyAttendanceMap.get(id);
+    const existingHere = (data.attendance || []).find(a => a.event_id === event?.id && a.member_id === id);
+    if (existingToday && !existingHere) return;
+    setStatusMap(m => ({...m, [id]: m[id] === 'Present' ? 'Absent' : 'Present'}));
+  };
+  const markAll = (status) => {
+    const next = {};
+    members.forEach(m => {
+      const existingToday = dailyAttendanceMap.get(m.id);
+      const existingHere = (data.attendance || []).find(a => a.event_id === event?.id && a.member_id === m.id);
+      if (!existingToday || existingHere) next[m.id] = status;
+    });
+    setStatusMap(next);
+  };
 
   const saveAll = () => {
     if (!event) return;
+    const conflicts = members.filter(m => statusMap[m.id] && dailyAttendanceMap.has(m.id) && !(data.attendance || []).some(a => a.event_id === event.id && a.member_id === m.id));
+    if (conflicts.length) {
+      alert(`${conflicts.length} member${conflicts.length === 1 ? '' : 's'} already marked on ${event.date}. Attendance can only be marked once per person per day.
+
+${conflicts.slice(0, 8).map(m => m.name).join(', ')}${conflicts.length > 8 ? '…' : ''}`);
+      return;
+    }
     let count = 0;
     members.forEach(m => {
       const status = statusMap[m.id];
       if (!status) return;
       const existing = (data.attendance || []).find(a => a.event_id === event.id && a.member_id === m.id);
-      save('attendance', {
+      const result = save('attendance', {
         id: existing?.id || uuid(), event_id: event.id, date: event.date,
         service: `Event: ${event.title}`, person_name: m.name, member_id: m.id,
         status, note: existing?.note || `Event occurrence attendance: ${event.title}`
       });
+      if (result?.duplicate) { alert(result.error.message); return; }
       count++;
     });
     alert(`Saved ${count} attendance record${count === 1 ? '' : 's'} for ${event.title}.`);
@@ -748,7 +888,12 @@ export function EventAttendance() {
     </div>
     {event && <div className="cards"><div className="card"><span className="label">Event</span><strong>{event.title}</strong></div><div className="card"><span className="label">Date</span><strong>{event.date}</strong></div><div className="card"><span className="label">Present</span><strong>{present}</strong></div><div className="card"><span className="label">Absent</span><strong>{absent}</strong></div></div>}
     {event && <div className="panel"><h2>{event.title} attendance</h2><div className="muted" style={{marginBottom:12}}>{event.date} {event.event_time || ''} {event.location ? `· ${event.location}` : ''}{registrations.length ? ` · ${registrations.length} registered` : ''}</div><div className="tablewrap"><table><thead><tr><th>Member</th><th>Phone</th><th>Status</th><th></th></tr></thead><tbody>
-      {members.map(m => <tr key={m.id}><td><b>{m.name}</b><br/><small>{m.member_code || ''}</small></td><td>{m.phone || ''}</td><td>{statusMap[m.id] ? badge(statusMap[m.id]) : <span className="muted">Not marked</span>}</td><td>{canWrite && <button onClick={() => toggle(m.id)}>{statusMap[m.id] === 'Present' ? 'Mark absent' : 'Mark present'}</button>}</td></tr>)}
+      {members.map(m => {
+        const existingToday = dailyAttendanceMap.get(m.id);
+        const existingHere = (data.attendance || []).find(a => a.event_id === event.id && a.member_id === m.id);
+        const blocked = !!existingToday && !existingHere;
+        return <tr key={m.id}><td><b>{m.name}</b><br/><small>{m.member_code || ''}</small></td><td>{m.phone || ''}</td><td>{statusMap[m.id] ? badge(statusMap[m.id]) : blocked ? <span className="muted">Already marked today</span> : <span className="muted">Not marked</span>}</td><td>{canWrite && <button disabled={blocked} title={blocked ? `Already marked today (${existingToday.service || 'attendance'})` : ''} onClick={() => toggle(m.id)}>{blocked ? 'Already marked today' : statusMap[m.id] === 'Present' ? 'Mark absent' : 'Mark present'}</button>}</td></tr>;
+      })}
       {!members.length && <tr><td colSpan="4" className="empty">No members found for this occurrence.</td></tr>}
     </tbody></table></div></div>}
     {event && <div className="panel"><div className="top"><div><h2 style={{margin:0}}>Attendance report for this event series</h2><div className="muted">Each occurrence is shown separately.</div></div></div><div className="cards"><div className="card"><span className="label">Occurrences</span><strong>{seriesReport.length}</strong></div><div className="card"><span className="label">Total present</span><strong>{seriesTotalPresent}</strong></div><div className="card"><span className="label">Average present</span><strong>{seriesAvg}</strong></div></div><div className="tablewrap"><table><thead><tr><th>Date</th><th>Time</th><th>Present</th><th>Absent</th><th>Visitors</th><th></th></tr></thead><tbody>
@@ -798,7 +943,7 @@ export function ServiceTimerLive() {
 export function SendSMS() {
   const { data } = useData();
   const { role } = useAuth();
-  const allowed = isSuperAdmin(role) || ['secretary'].includes(role);
+  const allowed = ['admin', 'secretary'].includes(role) || isSuperAdmin(role);
   const groups = [...new Set(data.members.map((m) => m.grp).filter(Boolean))].sort();
 
   const [audience, setAudience] = useState('active');
@@ -1020,13 +1165,13 @@ function ContributionsGrid({ fund, roster, title }) {
 
 export function FirstFruit() {
   const { data } = useData();
-  const roster = [...data.members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name));
+  const roster = [...data.members].filter((m) => !['Inactive', 'Left'].includes(m.status)).sort((a, b) => a.name.localeCompare(b.name));
   return <ContributionsGrid fund="First Fruit" roster={roster} title="First Fruit Register" />;
 }
 
 export function WelfareDues() {
   const { data } = useData();
-  const roster = [...data.members].filter((m) => m.status !== 'Inactive').sort((a, b) => a.name.localeCompare(b.name));
+  const roster = [...data.members].filter((m) => !['Inactive', 'Left'].includes(m.status)).sort((a, b) => a.name.localeCompare(b.name));
   return <ContributionsGrid fund="Welfare Dues" roster={roster} title="Welfare Dues" />;
 }
 
@@ -1103,6 +1248,22 @@ export function HeadcountAttendance() {
   const [date, setDate] = useState(today());
   const [service, setService] = useState('Sunday Service');
   const [edits, setEdits] = useState({});
+  const serviceTouched = useRef(false);
+  const upcomingEvents = useMemo(() => [...(data.events || [])]
+    .filter(e => String(e.date || '') >= today())
+    .sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.event_time || '').localeCompare(String(b.event_time || ''))), [data.events]);
+  const eventForDate = useMemo(() => upcomingEvents.find(e => String(e.date || '').slice(0,10) === date), [upcomingEvents, date]);
+  const suggestedService = useMemo(() => {
+    if (eventForDate?.title) return eventForDate.title;
+    const weekday = new Date(`${date}T00:00:00`).getDay();
+    if (weekday === 0) return 'Sunday Service';
+    if (weekday === 2) return 'Bible Study';
+    if (weekday === 4) return 'Prayer Meeting';
+    return 'Other';
+  }, [eventForDate, date]);
+  useEffect(() => {
+    if (!serviceTouched.current) setService(suggestedService);
+  }, [suggestedService]);
   const existing = useMemo(() => { const map=new Map(); data.attendance_headcount.forEach(r=>{if(r.date===date&&r.service===service)map.set(r.category,r);}); return map; }, [data.attendance_headcount,date,service]);
   useEffect(()=>setEdits({}),[date,service]);
   const valueFor=cat=>(cat in edits?edits[cat]:String(existing.get(cat)?.count??''));
@@ -1114,143 +1275,12 @@ export function HeadcountAttendance() {
   const saveAll=()=>{let n=0;HEADCOUNT_CATEGORIES.forEach(cat=>{if(!(cat in edits))return;const count=Number(edits[cat])||0;const rec=existing.get(cat);save('attendance_headcount',{id:rec?rec.id:uuid(),date,service,category:cat,count});n++;});setEdits({});alert(n?`Saved headcount for ${n} categor${n===1?'y':'ies'}. Total: ${total}.`:'No changes to save.');};
   const history=[...new Set(data.attendance_headcount.map(r=>r.date+'|'+r.service))].sort().reverse().slice(0,10).map(k=>{const[d,s]=k.split('|');const rows=data.attendance_headcount.filter(r=>r.date===d&&r.service===s);const get=c=>Number(rows.find(r=>r.category===c)?.count||0);const childrenBoys=get('Children Boys'),childrenGirls=get('Children Girls'),omegaBoys=get('Youth Boys'),omegaGirls=get('Youth Girls'),adultMen=get('Adult Men'),adultWomen=get('Adult Women');return{date:d,service:s,childrenBoys,childrenGirls,omegaBoys,omegaGirls,adultMen,adultWomen,children:childrenBoys+childrenGirls,omega:omegaBoys+omegaGirls,adults:adultMen+adultWomen,total:rows.reduce((sum,r)=>sum+Number(r.count||0),0)};});
   return <><div className="top"><h1>Headcount Attendance</h1><button className="primary" onClick={saveAll}>Save headcount</button></div>
-    <div className="panel"><div className="toolbar"><div className="fld"><small>Date</small><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}>{SERVICES.map(s=><option key={s}>{s}</option>)}</select></div></div>
+    <div className="panel"><div className="toolbar"><div className="fld"><small>Date</small><input type="date" value={date} onChange={e=>{serviceTouched.current=false;setDate(e.target.value||today());}}/><small className="muted">{dayName(date)}</small></div><div className="fld"><small>Event / Service</small><select value={service} onChange={e=>{serviceTouched.current=true;setService(e.target.value);}}>{eventForDate?.title && <option value={eventForDate.title}>{eventForDate.title} · {date}</option>}{SERVICES.filter(s=>s!==eventForDate?.title).map(s=><option key={s}>{s}</option>)}</select></div></div>
       <div className="cards"><div className="card"><div className="label">Adults</div><strong>{adultTotal}</strong></div><div className="card"><div className="label">Omega</div><strong>{omegaTotal}</strong></div><div className="card"><div className="label">Children</div><strong>{childrenTotal}</strong></div><div className="card"><div className="label">Total attendance</div><strong>{total}</strong></div></div>
       <h2>Detailed breakdown</h2><div className="grid2">{HEADCOUNT_CATEGORIES.map(cat=><div className="fld" key={cat}><small>{headcountLabel(cat)}</small><input type="number" min="0" value={valueFor(cat)} onChange={e=>setEdits(ed=>({...ed,[cat]:e.target.value}))}/></div>)}</div>
     </div>
     <div className="panel"><h2>Recent headcount breakdowns</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Service</th><th>Adult Men</th><th>Adult Women</th><th>Omega Boys</th><th>Omega Girls</th><th>Children Boys</th><th>Children Girls</th><th>Total</th></tr></thead><tbody>{history.map(r=><tr key={r.date+r.service}><td>{r.date}</td><td>{r.service}</td><td>{r.adultMen}</td><td>{r.adultWomen}</td><td>{r.omegaBoys}</td><td>{r.omegaGirls}</td><td>{r.childrenBoys}</td><td>{r.childrenGirls}</td><td><b>{r.total}</b></td></tr>)}{!history.length&&<tr><td colSpan="9" className="empty">No headcounts recorded yet.</td></tr>}</tbody></table></div></div>
   </>;
-}
-
-/* ---------------- Reports ---------------- */
-export function Reports() {
-  const { data } = useData();
-  const { role } = useAuth();
-  const showGiving = can(role, 'giving', 'read');
-  const showOfferings = can(role, 'offering_entries', 'read');
-  const years = [...new Set([...data.giving.map((g) => String(g.date).slice(0, 4)), ...data.offering_entries.map((o) => String(o.date).slice(0, 4))])].sort().reverse();
-  const [year, setYear] = useState('');
-  const y = year || years[0] || String(new Date().getFullYear());
-
-  const yg = data.giving.filter((g) => String(g.date).startsWith(y));
-  const byType = {};
-  yg.forEach((g) => { byType[g.type] = (byType[g.type] || 0) + Number(g.amount); });
-  const byMonth = Array(12).fill(0);
-  yg.forEach((g) => { byMonth[Number(String(g.date).slice(5, 7)) - 1] += Number(g.amount); });
-  const total = yg.reduce((a, g) => a + Number(g.amount), 0);
-
-  const yo = data.offering_entries.filter((o) => String(o.date).startsWith(y));
-  const byCategory = {};
-  yo.forEach((o) => { byCategory[o.category] = (byCategory[o.category] || 0) + Number(o.amount); });
-  const offByMonth = Array(12).fill(0);
-  yo.forEach((o) => { offByMonth[Number(String(o.date).slice(5, 7)) - 1] += Number(o.amount); });
-  const offTotal = yo.reduce((a, o) => a + Number(o.amount), 0);
-
-  const groups = {};
-  data.attendance.forEach((a) => {
-    const k = a.date + '|' + a.service;
-    if (!groups[k]) groups[k] = { date: a.date, service: a.service, Present: 0, Visitor: 0, Absent: 0 };
-    groups[k][a.status] += 1;
-  });
-  const att = Object.values(groups).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
-
-  const exportable = TABLES.filter((t) => can(role, t, 'read'));
-
-  // Flags active members who haven't shown Present in the last 3 recorded Sunday Services —
-  // the kind of "who's fallen off" list a pastor actually needs, not just raw numbers.
-  const lastServices = [...new Set(data.attendance.filter((a) => a.status !== 'Visitor').map((a) => a.date + '|' + a.service))]
-    .sort().reverse().slice(0, 3);
-  const presentRecently = new Set(
-    data.attendance.filter((a) => a.status === 'Present' && lastServices.includes(a.date + '|' + a.service)).map((a) => a.person_name),
-  );
-  const missing = lastServices.length >= 2
-    ? data.members.filter((m) => m.status === 'Active' && !presentRecently.has(m.name))
-    : [];
-
-  return (
-    <>
-      <div className="top"><h1>Reports</h1></div>
-      {showGiving && (
-        <div className="panel">
-          <div className="top" style={{ marginBottom: 10 }}>
-            <h2 style={{ margin: 0 }}>Giving summary</h2>
-            <select value={y} onChange={(e) => setYear(e.target.value)}>
-              {(years.length ? years : [y]).map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </div>
-          <p><b>Total {y}: {money(total)}</b></p>
-          <div className="grid2">
-            <div className="tablewrap"><table>
-              <thead><tr><th>Type</th><th>Amount</th></tr></thead>
-              <tbody>
-                {Object.entries(byType).map(([k, v]) => <tr key={k}><td>{k}</td><td>{money(v)}</td></tr>)}
-                {!Object.keys(byType).length && <tr><td colSpan="2" className="empty">No giving in {y}.</td></tr>}
-              </tbody>
-            </table></div>
-            <div className="tablewrap"><table>
-              <thead><tr><th>Month</th><th>Amount</th></tr></thead>
-              <tbody>{byMonth.map((v, i) => <tr key={i}><td>{MONTHS[i]}</td><td>{money(v)}</td></tr>)}</tbody>
-            </table></div>
-          </div>
-        </div>
-      )}
-      {showOfferings && (
-        <div className="panel">
-          <div className="top" style={{ marginBottom: 10 }}>
-            <h2 style={{ margin: 0 }}>Offerings summary</h2>
-            <select value={y} onChange={(e) => setYear(e.target.value)}>
-              {(years.length ? years : [y]).map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </div>
-          <p><b>Total {y}: {money(offTotal)}</b></p>
-          <div className="grid2">
-            <div className="tablewrap"><table>
-              <thead><tr><th>Category</th><th>Amount</th></tr></thead>
-              <tbody>
-                {OFFERING_CATEGORIES.map((c) => <tr key={c}><td>{c}</td><td>{money(byCategory[c] || 0)}</td></tr>)}
-                {!yo.length && <tr><td colSpan="2" className="empty">No offerings recorded in {y}.</td></tr>}
-              </tbody>
-            </table></div>
-            <div className="tablewrap"><table>
-              <thead><tr><th>Month</th><th>Amount</th></tr></thead>
-              <tbody>{offByMonth.map((v, i) => <tr key={i}><td>{MONTHS[i]}</td><td>{money(v)}</td></tr>)}</tbody>
-            </table></div>
-          </div>
-        </div>
-      )}
-      <div className="panel">
-        <h2>Attendance by service (latest 12)</h2>
-        <div className="tablewrap"><table>
-          <thead><tr><th>Date</th><th>Service</th><th>Present</th><th>Visitors</th><th>Absent</th></tr></thead>
-          <tbody>
-            {att.map((r) => <tr key={r.date + r.service}><td>{r.date}</td><td>{r.service}</td><td>{r.Present}</td><td>{r.Visitor}</td><td>{r.Absent}</td></tr>)}
-            {!att.length && <tr><td colSpan="5" className="empty">No attendance recorded yet.</td></tr>}
-          </tbody>
-        </table></div>
-      </div>
-      <div className="panel">
-        <h2>Follow-up: active members missing the last {lastServices.length} recorded service(s)</h2>
-        {lastServices.length < 2 ? (
-          <p className="muted">Record at least two services in Attendance to see this list.</p>
-        ) : missing.length ? (
-          <div className="tablewrap"><table>
-            <thead><tr><th>Name</th><th>Phone</th><th>Group</th></tr></thead>
-            <tbody>{missing.map((m) => <tr key={m.id}><td><b>{m.name}</b></td><td>{m.phone || '—'}</td><td>{m.grp || '—'}</td></tr>)}</tbody>
-          </table></div>
-        ) : <div className="empty">No one is missing — everyone active showed up recently.</div>}
-      </div>
-      <div className="panel">
-        <h2>Export to Excel (CSV)</h2>
-        <div className="btnrow">
-          {exportable.map((t) => (
-            <button key={t} className="secondary" onClick={() => (data[t].length ? downloadCSV(t, data[t]) : alert('No data to export'))}>
-              {t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-    </>
-  );
 }
 
 /* ---------------- Users (admin only) ---------------- */
@@ -1272,12 +1302,14 @@ const randomPassword = () => {
   return Array.from(a, (n) => chars[n % chars.length]).join('');
 };
 
-function UserDialog({ mode, target, onClose, onDone }) {
+function UserDialog({ mode, target, onClose, onDone, currentRole }) {
   // mode: 'create' | 'reset'
   const [f, setF] = useState({ full_name: '', email: '', role: 'viewer', password: randomPassword() });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [done, setDone] = useState(null);
+  const [roleOptions, setRoleOptions] = useState(isSuperAdmin(currentRole) ? ROLES.filter(r=>r!=='pending') : ROLES.filter((r) => r !== 'super_admin' && r !== 'pending'));
+  useEffect(()=>{ supabase.from('role_catalog').select('role_key').neq('role_key','pending').order('label').then(({data})=>{ if(data?.length) setRoleOptions(data.map(r=>r.role_key).filter(r=>isSuperAdmin(currentRole)||r!=='super_admin')); }); },[currentRole]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   async function submit(e) {
@@ -1315,7 +1347,7 @@ function UserDialog({ mode, target, onClose, onDone }) {
                 <div className="fld"><small>Full name</small><input value={f.full_name} onChange={set('full_name')} required /></div>
                 <div className="fld"><small>Email</small><input type="email" value={f.email} onChange={set('email')} required /></div>
                 <div className="fld"><small>Role</small>
-                  <select value={f.role} onChange={set('role')}>{ROLES.map((r) => <option key={r} value={r}>{r === 'super_admin' ? 'Super Admin' : r}</option>)}</select>
+                  <select value={f.role} onChange={set('role')}>{roleOptions.map((r) => <option key={r}>{r}</option>)}</select>
                 </div>
               </>}
               <div className="fld"><small>{mode === 'create' ? 'Password' : 'New password'}</small>
@@ -1335,21 +1367,21 @@ function UserDialog({ mode, target, onClose, onDone }) {
 }
 
 export function Users() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [rows, setRows] = useState(null);
   const [msg, setMsg] = useState('');
   const [dialog, setDialog] = useState(null);
+  const [roleOptions, setRoleOptions] = useState([]);
 
   const load = async () => {
     const { data, error } = await supabase.from('profiles').select('*').order('created_at');
     if (error) setMsg(error.message); else { setRows(data); setMsg(''); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); supabase.from('role_catalog').select('role_key,label').neq('role_key','pending').order('label').then(({data})=>{ if(data) setRoleOptions(data.map(r=>r.role_key).filter(r=>isSuperAdmin(role)||r!=='super_admin')); }); }, []);
 
-  const change = async (id, role) => {
-    const { data, error } = await supabase.from('profiles').update({ role }).eq('id', id).select();
-    if (error || !data?.length) setMsg(error?.message || 'Not updated (no permission).');
-    else load();
+  const change = async (id, newRole) => {
+    try { await adminCall({ action: 'set_role', user_id: id, role: newRole }); load(); }
+    catch (ex) { setMsg(ex.message); }
   };
 
   const remove = async (p) => {
@@ -1368,7 +1400,7 @@ export function Users() {
       <div className="tablewrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
         <tbody>{(rows || []).map((p) => <tr key={p.id}>
           <td><b>{p.full_name || '—'}</b></td><td>{p.email}</td>
-          <td><select value={p.role} disabled={p.id === user.id} onChange={(e) => change(p.id, e.target.value)}>{ROLES.map(r => <option key={r} value={r}>{r === 'super_admin' ? 'Super Admin' : r}</option>)}</select></td>
+          <td><select value={p.role} disabled={p.id === user.id || (p.role === 'super_admin' && !isSuperAdmin(role))} onChange={(e) => change(p.id, e.target.value)}>{roleOptions.map(r => <option key={r}>{r}</option>)}</select></td>
           <td>{String(p.created_at).slice(0, 10)}</td>
           <td className="actions"><button className="secondary" onClick={() => setDialog({ mode: 'reset', target: p })}>Reset password</button>{p.id !== user.id && <button className="danger" onClick={() => remove(p)}>Delete</button>}</td>
         </tr>)}
@@ -1376,7 +1408,7 @@ export function Users() {
         {!rows && <tr><td colSpan="5" className="empty">Loading…</td></tr>}</tbody>
       </table></div>
     </div>
-    {dialog && <UserDialog {...dialog} onClose={() => setDialog(null)} onDone={load} />}
+    {dialog && <UserDialog {...dialog} currentRole={role} onClose={() => setDialog(null)} onDone={load} />}
   </>;
 }
 
@@ -1396,7 +1428,7 @@ export function Visitors() {
 export function ABCClass() {
   const { data, save, remove } = useData();
   const { role } = useAuth();
-  const canWrite = isSuperAdmin(role) || ['secretary'].includes(role);
+  const canWrite = ['admin','secretary'].includes(role) || isSuperAdmin(role);
   const [q, setQ] = useState('');
   const [date, setDate] = useState(today());
   const [startDate, setStartDate] = useState('');
@@ -1407,7 +1439,7 @@ export function ABCClass() {
   const group = (data.groups || []).find(g => String(g.name).trim().toLowerCase() === 'abc class');
   const participants = (data.group_members || []).filter(x => x.group_id === group?.id && x.status !== 'Inactive');
   const participantIds = new Set(participants.map(x => x.member_id));
-  const members = (data.members || []).filter(m => m.status !== 'Inactive');
+  const members = (data.members || []).filter(m => !['Inactive', 'Left'].includes(m.status));
   const search = q.trim().toLowerCase();
   const matches = members.filter(m => !search || `${m.name} ${m.member_code || ''} ${m.phone || ''}`.toLowerCase().includes(search)).slice(0, 25);
   const selectedDate = new Date(`${date}T00:00:00`);
@@ -1525,11 +1557,29 @@ export function PastoralCare() {
 
 export function AuditLog() {
   const { role } = useAuth();
-  const [rows,setRows]=useState([]); const [error,setError]=useState('');
-  useEffect(()=>{ if(!isSuperAdmin(role)) return; supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);}); },[role]);
-  if(!isSuperAdmin(role)) return <div className="panel"><h1>Audit Log</h1><p className="muted">Super Admin access only.</p></div>;
-  return <><div className="top"><h1>Audit Log</h1><button className="secondary" onClick={()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else setRows(data||[]);})}>Refresh</button></div>
-    <div className="panel">{error&&<div className="err">{error}</div>}<div className="tablewrap"><table><thead><tr><th>Time</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{new Date(r.at).toLocaleString()}</td><td>{r.table_name}</td><td>{badge(r.action)}</td><td>{r.row_id}</td><td>{r.actor||'System'}</td></tr>)}{!rows.length&&<tr><td colSpan="5" className="empty">No audit records.</td></tr>}</tbody></table></div></div></>;
+  const [rows,setRows]=useState([]); const [error,setError]=useState(''); const [notice,setNotice]=useState('');
+  const [olderThan,setOlderThan]=useState('365'); const [busy,setBusy]=useState(false);
+  const load=()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else{setError('');setRows(data||[]);}});
+  useEffect(()=>{ if(!isAdmin(role)) return; load(); },[role]);
+  const purge=async()=>{
+    const days=Number(olderThan);
+    const label={90:'3 months',180:'6 months',365:'1 year',730:'2 years'}[days]||`${days} days`;
+    if(!confirm(`Permanently delete every audit log entry older than ${label}? This cannot be undone. A note recording who did this will be kept.`)) return;
+    setBusy(true); setError(''); setNotice('');
+    const { data, error: err } = await supabase.rpc('purge_audit_log', { p_older_than_days: days });
+    setBusy(false);
+    if(err){ setError(/purge_audit_log/.test(err.message)&&/function|schema cache/i.test(err.message) ? 'The cleanup function is not installed yet. Run migration_46 in the Supabase SQL editor.' : err.message); return; }
+    setNotice(`${data} old ${data===1?'entry was':'entries were'} deleted.`);
+    load();
+  };
+  if(!isAdmin(role)) return <div className="panel"><h1>Audit Log</h1><p className="muted">Admin access only.</p></div>;
+  return <><div className="top"><h1>Audit Log</h1><button className="secondary" onClick={load}>Refresh</button></div>
+    {isSuperAdmin(role)&&<div className="panel"><div className="btnrow" style={{alignItems:'center',flexWrap:'wrap'}}>
+      <span>Clean up: delete entries older than</span>
+      <select value={olderThan} onChange={e=>setOlderThan(e.target.value)} disabled={busy}><option value="90">3 months</option><option value="180">6 months</option><option value="365">1 year</option><option value="730">2 years</option></select>
+      <button className="danger" disabled={busy} onClick={purge}>{busy?'Deleting…':'Delete old entries'}</button>
+    </div><p className="muted" style={{marginBottom:0}}>Only the Super Admin can do this. The list below shows the latest 300 entries.</p></div>}
+    <div className="panel">{error&&<div className="err">{error}</div>}{notice&&<div style={{color:'var(--ok)',fontSize:13,marginBottom:8}}>{notice}</div>}<div className="tablewrap"><table><thead><tr><th>Time</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{new Date(r.at).toLocaleString()}</td><td>{r.table_name}</td><td>{badge(r.action)}</td><td>{r.row_id||(r.action==='PURGE'&&r.new_row?`${r.new_row.deleted} entries removed`:'')}</td><td>{r.actor_name || r.actor || 'System'}</td></tr>)}{!rows.length&&<tr><td colSpan="5" className="empty">No audit records.</td></tr>}</tbody></table></div></div></>;
 }
 
 /* ---------------- Settings ---------------- */
@@ -1609,19 +1659,15 @@ export function Settings() {
           </>
         )}
       </div>
-      <div className="panel" style={{ border: '2px solid #b91c1c' }}>
+      {isSuperAdmin(role) && <div className="panel" style={{ border: '2px solid #b91c1c' }}>
           <h2>🔴 Clear Test Data</h2>
-          <p className="muted">Use this once testing is complete. It permanently removes operational/test records from the church database while keeping administrator accounts, user roles, database structure and system settings.</p>
+          <p className="muted">Super Admin only. Use this once testing is complete. It permanently removes operational/test records from the church database while keeping administrator accounts, user roles, database structure and system settings.</p>
           <p><b>Before using this:</b> make a backup if you may need any of the test records later.</p>
           <label>Type <code>CLEAR TEST DATA</code> to confirm</label>
           <input value={resetPhrase} onChange={e => setResetPhrase(e.target.value)} placeholder="CLEAR TEST DATA" style={{ width: '100%', maxWidth: 420, marginBottom: 10 }} disabled={resetBusy} />
           {resetMsg && <div className={resetMsg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{resetMsg.t}</div>}
-          {isSuperAdmin(role) ? (
-            <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data…' : 'Permanently Clear Test Data'}</button>
-          ) : (
-            <p className="muted"><b>Administrator only.</b> Sign in with an administrator account to use this reset.</p>
-          )}
-        </div>
+          <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data…' : 'Permanently Clear Test Data'}</button>
+        </div>}
       <div className="panel">
         <h2>Backup</h2>
         <p className="muted">Your data lives in Supabase. Download a copy of what this device can see:</p>
@@ -1681,6 +1727,7 @@ export function Children() {
         {key:'member_id',label:'Linked member/guardian',type:'select',options:members},
         {key:'guardian_name',label:'Guardian name'},
         {key:'guardian_phone',label:'Guardian phone',type:'tel'},
+        {key:'attendance_group',label:'Attendance Group / Class',placeholder:'e.g. Red Class, Blue Class'},
         {key:'pickup_notes',label:'Pickup notes',type:'textarea',full:true},
         {key:'medical_notes',label:'Medical notes',type:'textarea',full:true},
         {key:'status',label:'Status',type:'select',options:['Active','Inactive'],required:true},
@@ -1709,37 +1756,200 @@ export function Children() {
   </>;
 }
 
-export function ChildrenQuickAttendance() {
-  const { data, save } = useData();
+export function QuickAttendanceList({ mode = 'member', memberType = '', title = 'Quick Attendance' }) {
+  const { data, save, remove } = useData();
   const [q, setQ] = useState('');
-  const [service, setService] = useState("Children's Service");
+  const defaultService = mode === 'child' ? "Children's Service" : 'Sunday Service';
+  const [service, setService] = useState(defaultService);
+  const [attendanceDate, setAttendanceDate] = useState(today());
+  const [eventChoice, setEventChoice] = useState('');
+  const [selected, setSelected] = useState(new Set());
   const [msg, setMsg] = useState('');
-  const active = (data.children || []).filter(c => c.status === 'Active');
-  const results = q.trim()
-    ? active.filter(c => `${c.name} ${c.guardian_name || ''} ${c.guardian_phone || ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 30)
-    : active.slice(0, 30);
-  const checked = new Set((data.attendance || [])
-    .filter(a => a.date === today() && a.service === service && a.status === 'Present' && a.child_id)
-    .map(a => a.child_id));
-  function checkIn(c) {
-    if (checked.has(c.id)) { setMsg(`${c.name} is already marked present for ${service}.`); return; }
-    save('attendance', { id: uuid(), date: today(), service, person_name: c.name, child_id: c.id, status: 'Present', note: 'Children Department quick attendance' });
-    setMsg(`${c.name} marked present.`);
-  }
+  const selectionDirty = useRef(false);
+  const currentKey = `${mode}|${memberType}|${attendanceDate}|${service}`;
+  const lastLoadedKey = useRef('');
+
+  const upcomingEvents = useMemo(() => [...(data.events || [])]
+    .filter(e => String(e.date || '') >= today())
+    .sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.event_time || '').localeCompare(String(b.event_time || '')))
+    .slice(0, 50), [data.events]);
+
+  // Start each attendance register on today's date and, when an upcoming event exists
+  // for today, use that event automatically instead of assuming Sunday Service.
+  useEffect(() => {
+    if (eventChoice) return;
+    const eventToday = upcomingEvents.find(e => String(e.date || '').slice(0,10) === attendanceDate);
+    if (eventToday) {
+      setService(eventToday.title || defaultService);
+      return;
+    }
+    const weekday = new Date(`${attendanceDate}T00:00:00`).getDay();
+    if (mode !== 'child') {
+      if (weekday === 0) setService('Sunday Service');
+      else if (weekday === 2) setService('Bible Study');
+      else if (weekday === 4) setService('Prayer Meeting');
+    }
+  }, [upcomingEvents, attendanceDate, mode, eventChoice, defaultService]);
+
+  const roster = useMemo(() => {
+    if (mode === 'child') {
+      return [...(data.children || [])].filter(c => c.status === 'Active').sort((a,b) => {
+        const ga = String(a.attendance_group || 'UNASSIGNED').toUpperCase(), gb = String(b.attendance_group || 'UNASSIGNED').toUpperCase();
+        return ga.localeCompare(gb) || String(a.name || '').localeCompare(String(b.name || ''));
+      });
+    }
+    return [...(data.members || [])].filter(m => !['Inactive', 'Left'].includes(m.status) && m.member_code && (!memberType || (m.member_type || 'Adult') === memberType)).sort(memberIdCompare);
+  }, [data.children, data.members, mode, memberType]);
+
+  const presentMap = useMemo(() => {
+    const map = new Map();
+    (data.attendance || []).filter(a => String(a.date || '').slice(0,10) === attendanceDate && a.service === service && a.status === 'Present').forEach(a => {
+      const id = mode === 'child' ? a.child_id : a.member_id;
+      if (id) map.set(id, a);
+    });
+    return map;
+  }, [data.attendance, attendanceDate, service, mode]);
+
+  const dailyAttendanceMap = useMemo(() => {
+    const map = new Map();
+    (data.attendance || []).filter(a => String(a.date || '').slice(0,10) === attendanceDate).forEach(a => {
+      const id = mode === 'child' ? a.child_id : a.member_id;
+      if (id && !map.has(id)) map.set(id, a);
+    });
+    return map;
+  }, [data.attendance, attendanceDate, mode]);
+
+  // Load the saved register when the attendance context changes. Do not reset an in-progress
+  // register when optimistic saves or background sync update data.attendance.
+  useEffect(() => {
+    if (lastLoadedKey.current === currentKey) return;
+    lastLoadedKey.current = currentKey;
+    selectionDirty.current = false;
+    setSelected(new Set(presentMap.keys()));
+    setMsg('');
+  }, [currentKey]);
+
+  // On the initial/background data load, hydrate the register only while the user has not
+  // started changing checkboxes. This prevents search/mark operations from being undone.
+  useEffect(() => {
+    if (!selectionDirty.current) setSelected(new Set(presentMap.keys()));
+  }, [data.attendance]);
+
+  const shown = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return roster.filter(x => !term || (mode === 'child'
+      ? `${x.name || ''} ${x.guardian_name || ''} ${x.guardian_phone || ''} ${x.attendance_group || ''}`.toLowerCase().includes(term)
+      : `${x.name || ''} ${x.member_code || ''} ${x.phone || ''} ${x.grp || ''}`.toLowerCase().includes(term)));
+  }, [roster, q, mode]);
+
+  const memberPhotoMap = useMemo(() => {
+    const map = new Map();
+    (data.members || []).forEach(m => map.set(m.id, m.photo_url || ''));
+    return map;
+  }, [data.members]);
+
+  const groups = useMemo(() => {
+    const out = {};
+    shown.forEach(x => {
+      const g = mode === 'child' ? (x.attendance_group || 'UNASSIGNED') : (x.grp || 'UNASSIGNED');
+      (out[g] ||= []).push(x);
+    });
+    return Object.entries(out).sort((a,b) => a[0].localeCompare(b[0]));
+  }, [shown, mode]);
+
+  const toggle = (id) => {
+    selectionDirty.current = true;
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+  const setGroup = (items, value) => {
+    selectionDirty.current = true;
+    setSelected(prev => {
+      const n = new Set(prev);
+      items.forEach(x => {
+        const existingToday = dailyAttendanceMap.get(x.id);
+        const editableHere = presentMap.get(x.id);
+        if (value && existingToday && !editableHere) return;
+        value ? n.add(x.id) : n.delete(x.id);
+      });
+      return n;
+    });
+  };
+
+  const chooseEvent = (value) => {
+    setEventChoice(value);
+    if (value.startsWith('event:')) {
+      const event = upcomingEvents.find(e => `event:${e.id}` === value);
+      if (event) {
+        setService(event.title || defaultService);
+        setAttendanceDate(String(event.date || today()).slice(0,10));
+      }
+    } else if (value.startsWith('service:')) {
+      setService(value.slice(8));
+    }
+  };
+
+  const saveAttendance = async () => {
+    const current = new Map(presentMap);
+    const conflicts = roster.filter(item => selected.has(item.id) && !current.has(item.id) && dailyAttendanceMap.has(item.id));
+    if (conflicts.length) {
+      const names = conflicts.slice(0, 5).map(x => x.name).join(', ');
+      setMsg(`${conflicts.length} person${conflicts.length === 1 ? '' : 's'} already marked today: ${names}${conflicts.length > 5 ? '…' : ''}. Each person can be marked only once per day.`);
+      return;
+    }
+    let added = 0, removed = 0;
+    for (const item of roster) {
+      const id = item.id, should = selected.has(id), existing = current.get(id);
+      if (should && !existing) {
+        const result = save('attendance', { id: uuid(), date: attendanceDate, service, person_name: item.name, ...(mode === 'child' ? { child_id: id } : { member_id: id }), status: 'Present', note: `${title} checkbox attendance` });
+        if (result?.duplicate) {
+          setMsg(result.error.message);
+          return;
+        }
+        added++;
+      } else if (!should && existing) {
+        remove('attendance', existing.id); removed++;
+      }
+    }
+    selectionDirty.current = false;
+    setMsg(`Attendance saved. ${added} added, ${removed} cleared.`);
+  };
+
+  const day = dayName(attendanceDate);
+
   return <>
-    <div className="top"><div><h1>Children Quick Attendance</h1><div className="muted">Record Children's attendance from the Attendance menu. Child registration and parent particulars are managed under Members.</div></div></div>
+    <div className="top"><div><h1>{title}</h1><div className="muted">Tick the checkbox beside each person who is present, grouped by {mode === 'child' ? 'Children Group / Class' : 'Group / Cell'}.</div></div></div>
     <div className="panel">
-      <div className="toolbar">
-        <div className="fld"><small>Children service</small><select value={service} onChange={e => setService(e.target.value)}><option>Children's Service</option><option>Sunday School</option><option>Children's Special Program</option></select></div>
-        <input placeholder="Search child or parent/guardian" value={q} onChange={e => setQ(e.target.value)} />
+      <div className="toolbar quick-attendance-toolbar" style={{display:'grid',gridTemplateColumns:'minmax(180px,1.25fr) 150px 105px minmax(220px,2fr) auto',gap:8,alignItems:'end'}}>
+        <div className="fld"><small>Event / Service</small><select value={eventChoice || `service:${service}`} onChange={e=>chooseEvent(e.target.value)}>
+          <option value={`service:${service}`}>{service}</option>
+          <optgroup label="Upcoming events">{upcomingEvents.map(e=><option key={e.id} value={`event:${e.id}`}>{e.title} · {e.date}</option>)}</optgroup>
+          {mode !== 'child' && <optgroup label="Standard services"><option value="service:Sunday Service">Sunday Service</option><option value="service:Bible Study">Bible Study</option><option value="service:Prayer Meeting">Prayer Meeting</option><option value="service:Special Program">Special Program</option></optgroup>}
+          {mode === 'child' && <optgroup label="Children services"><option value="service:Children's Service">Children's Service</option><option value="service:Sunday School">Sunday School</option><option value="service:Children's Special Program">Children's Special Program</option></optgroup>}
+        </select></div>
+        <div className="fld"><small>Date</small><input type="date" value={attendanceDate} onChange={e=>{setEventChoice('');setAttendanceDate(e.target.value || today());}} /></div>
+        <div className="fld"><small>Day</small><input value={day} readOnly /></div>
+        <div className="fld"><small>{mode === 'child' ? 'Search child, parent, phone or class' : 'Search name, Member ID, phone or group'}</small><input placeholder={mode === 'child' ? 'Search child, parent, phone or class' : 'Search name, Member ID, phone or group'} value={q} onChange={e=>setQ(e.target.value)} /></div>
+        <button className="primary" onClick={saveAttendance}>Save Attendance</button>
       </div>
       {msg && <p className="muted">{msg}</p>}
-      <div className="quicklist">
-        {results.map(c => <button key={c.id} className="quickrow" onClick={() => checkIn(c)} disabled={checked.has(c.id)}>
-          <span><b>{c.name}</b><br /><small>{c.gender || ''}{c.guardian_name ? ` · ${c.guardian_name}` : ''}</small></span>
-          <span className="badge">{checked.has(c.id) ? 'Present' : 'Check in'}</span>
-        </button>)}
-        {!results.length && <div className="empty">No active children found.</div>}
+      {!groups.length && <div className="empty">No active people found.</div>}
+      <div className="quick-groups">
+        {groups.map(([group, items]) => <div className="quick-group" key={group}>
+          <div className="quick-group-head"><div><h3>{group}</h3><small>{items.length} people · {items.filter(x=>selected.has(x.id)).length} present</small></div><div><button className="secondary sm" onClick={()=>setGroup(items,true)}>All Present</button><button className="secondary sm" onClick={()=>setGroup(items,false)}>Clear</button></div></div>
+          <div className="quick-check-grid">
+            {items.map(x => {
+              const photoPath = mode === 'child' ? (x.photo_url || memberPhotoMap.get(x.member_id) || '') : (x.photo_url || '');
+              const alreadyToday = dailyAttendanceMap.get(x.id);
+              const editableHere = presentMap.get(x.id);
+              const blocked = !!alreadyToday && !editableHere;
+              return <label className={`quick-check-row${blocked ? ' attendance-blocked' : ''}`} key={x.id} title={blocked ? `Already marked today (${alreadyToday.service || 'attendance'})` : ''}>
+                <input type="checkbox" checked={selected.has(x.id)} disabled={blocked} onChange={()=>toggle(x.id)} />
+                <span className="quick-check-photo"><StoragePhoto path={photoPath} size={28} alt={`${x.name || 'Person'} photo`} /></span>
+                <span className="quick-check-info"><b>{x.name}</b><small>{mode === 'child' ? `${x.guardian_name || 'No guardian'}${x.guardian_phone ? ` · ${x.guardian_phone}` : ''}` : `${x.member_code || 'No ID'}${x.phone ? ` · ${x.phone}` : ''}`}{blocked ? ' · Already marked today' : ''}</small></span>
+              </label>;
+            })}
+          </div>
+        </div>)}
       </div>
     </div>
   </>;
@@ -1781,68 +1991,191 @@ export function ChildCheckIn() {
   </>;
 }
 
-export function MemberCheckIn({ memberType = '', title = 'Member Check-in' } = {}) {
-  const {data,save}=useData();
-  const [code,setCode]=useState('');
-  const [service,setService]=useState('Sunday Service');
-  const [msg,setMsg]=useState('');
-  const [recent,setRecent]=useState([]);
-  const eligibleMembers = useMemo(() => data.members.filter(m => m.member_code && (!memberType || (m.member_type || 'Adult') === memberType)), [data.members, memberType]);
-  const memberMap=useMemo(()=>new Map(eligibleMembers.map(m=>[String(m.member_code).toUpperCase(),m])),[eligibleMembers]);
-  function submit(e){
-    e.preventDefault();
-    const key=code.trim().toUpperCase();
-    const m=memberMap.get(key);
-    if(!m){setMsg('Member code not found.');return;}
-    const existing=data.attendance.find(a=>a.member_id===m.id && a.date===today() && a.service===service && a.status==='Present');
-    if(existing){setMsg(`${m.name} is already marked present.`);setCode('');return;}
-    save('attendance',{id:uuid(),date:today(),service,person_name:m.name,member_id:m.id,status:'Present',note:'Member code check-in'});
-    setRecent(r=>[{name:m.name,code:m.member_code,time:new Date().toLocaleTimeString()},...r].slice(0,10));
-    setMsg(`Welcome, ${m.name}. Attendance recorded.`);setCode('');
-  }
-  return <>
-    <div className="top"><div><h1>{title}</h1><div className="muted">Enter the unique member ID to record attendance for this department.</div></div></div>
-    <div className="panel" style={{maxWidth:700}}><form onSubmit={submit}><div className="fld"><small>Service</small><select value={service} onChange={e=>setService(e.target.value)}><option>Sunday Service</option><option>Midweek Service</option><option>Prayer Meeting</option><option>Special Program</option></select></div><div className="fld" style={{marginTop:14}}><small>{memberType ? `${memberType} Member ID` : 'Member ID'}</small><input autoFocus value={code} onChange={e=>setCode(e.target.value)} placeholder="Example: M-1A2B3C4D" autoCapitalize="characters" /></div><button className="primary" style={{marginTop:12}}>Record attendance</button></form>{msg&&<p className="muted">{msg}</p>}</div>
-    <div className="panel"><h2>Recent check-ins</h2>{recent.map((r,i)=><div className="listrow" key={i}><b>{r.name}</b><span className="muted"> · {r.code} · {r.time}</span></div>)}{!recent.length&&<p className="muted">No check-ins recorded in this browser session.</p>}</div>
-  </>;
-}
-
-export function AdultCheckIn() { return <MemberCheckIn memberType="Adult" title="Adult Quick Attendance" />; }
-export function OmegaCheckIn() { return <MemberCheckIn memberType="Omega" title="Omega Quick Attendance" />; }
+export function ChildrenQuickAttendance() { return <QuickAttendanceList mode="child" title="Children Quick Attendance" />; }
+export function AdultCheckIn() { return <QuickAttendanceList memberType="Adult" title="Adult Quick Attendance" />; }
+export function OmegaCheckIn() { return <QuickAttendanceList memberType="Omega" title="Omega Quick Attendance" />; }
 
 /* ---------------- Major Modules V11 ---------------- */
 export function FinanceCenter() {
-  const { data } = useData();
-  const { role } = useAuth();
-  if (!can(role, 'pledges', 'read')) return <div className="panel"><h2>Finance Center</h2><p className="muted">Finance access is restricted.</p></div>;
-  const totalPledged = data.pledges.reduce((a,p)=>a+Number(p.pledged_amount||0),0);
-  const totalPaid = data.pledges.reduce((a,p)=>a+Number(p.paid_amount||0),0);
-  const balance = totalPledged-totalPaid;
-  const activeProjects = [...new Set(data.pledges.map(p=>p.project).filter(Boolean))];
-  return <>
-    <div className="top"><div><h1>Finance Center</h1><div className="muted">Giving, pledges and project commitments in one place.</div></div></div>
-    <div className="cards">
-      <div className="card"><div className="label">Total pledged</div><div className="num" style={{fontSize:22}}>{money(totalPledged)}</div></div>
-      <div className="card"><div className="label">Paid</div><div className="num" style={{fontSize:22}}>{money(totalPaid)}</div></div>
-      <div className="card"><div className="label">Outstanding</div><div className="num" style={{fontSize:22}}>{money(balance)}</div></div>
-      <div className="card"><div className="label">Projects</div><div className="num">{activeProjects.length}</div></div>
+  const { data, save, remove } = useData();
+  const { role, profile } = useAuth();
+  if (!['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Center</h2><p className="muted">Finance access is restricted.</p></div>;
+
+  const DENOMS = [200,100,50,20,10,5,2,1,0.5,0.2,0.1];
+  const CATS = OFFERING_CATEGORIES;
+  const STANDARD_CATS = CATS.filter(c=>c!=='Weekday Offering');
+  const [tab,setTab] = useState('weekly');
+  const [date,setDate] = useState(today());
+  const [weekNo,setWeekNo] = useState(1);
+  const [year,setYear] = useState(new Date().getFullYear());
+  const [month,setMonth] = useState(new Date().getMonth()+1);
+  const [counts,setCounts] = useState({});
+  const [momo,setMomo] = useState({});
+  const [refs,setRefs] = useState({});
+  const [provider,setProvider] = useState({});
+  const [reportId,setReportId] = useState('');
+  const [report,setReport] = useState(null);
+  const [notes,setNotes] = useState('');
+  const [checkedBy,setCheckedBy] = useState('');
+  const [approvedBy,setApprovedBy] = useState('');
+  const [status,setStatus] = useState('Draft');
+  const [msg,setMsg] = useState('');
+  const [weekdayEntries,setWeekdayEntries] = useState([]);
+
+  const reports = data.finance_weekly_reports || [];
+  const cashRows = data.finance_weekly_cash_counts || [];
+  const momoRows = data.finance_weekly_momo || [];
+  const weekdayRows = data.finance_weekday_collections || [];
+  const weekdayCashRows = data.finance_weekday_cash_counts || [];
+  const weekdayMomoRows = data.finance_weekday_momo || [];
+
+  const emptyWeekdayEntry = (collectionDate=today()) => ({
+    id: uuid(), collection_date: collectionDate, notes:'', counts:{}, momo:'', provider:'', reference:'',
+  });
+
+  const loadReport = () => {
+    const r = reports.find(x => x.date === date && Number(x.week_no) === Number(weekNo));
+    const rid=r?.id || '';
+    setReport(r || null); setReportId(rid); setNotes(r?.notes || ''); setCheckedBy(r?.checked_by_name || ''); setApprovedBy(r?.approved_by_name || ''); setStatus(r?.status || 'Draft');
+    const c={}; cashRows.filter(x=>x.report_id===rid && x.category!=='Weekday Offering').forEach(x=>{ c[`${x.category}|${x.denomination}`]=Number(x.quantity||0); });
+    const m={}; const rr={}; const pp={}; momoRows.filter(x=>x.report_id===rid && x.category!=='Weekday Offering').forEach(x=>{m[x.category]=Number(x.amount||0); rr[x.category]=x.reference||''; pp[x.category]=x.provider||'';});
+    setCounts(c); setMomo(m); setRefs(rr); setProvider(pp);
+
+    const loaded=weekdayRows.filter(x=>x.report_id===rid).sort((a,b)=>String(a.collection_date).localeCompare(String(b.collection_date)) || String(a.created_at||'').localeCompare(String(b.created_at||'')));
+    setWeekdayEntries(loaded.map(x=>{
+      const wc={};
+      weekdayCashRows.filter(y=>y.collection_id===x.id).forEach(y=>{wc[String(y.denomination)]=Number(y.quantity||0);});
+      const wm=weekdayMomoRows.find(y=>y.collection_id===x.id);
+      return {id:x.id,collection_date:x.collection_date||date,notes:x.notes||'',counts:wc,momo:wm?.amount!=null?Number(wm.amount):'',provider:wm?.provider||'',reference:wm?.reference||''};
+    }));
+  };
+  useEffect(()=>{ if(tab==='weekly') loadReport(); },[date,weekNo,reports.length,cashRows.length,momoRows.length,weekdayRows.length,weekdayCashRows.length,weekdayMomoRows.length,tab]);
+
+  const cashTotal = (cat) => DENOMS.reduce((s,d)=>s + d*Number(counts[`${cat}|${d}`]||0),0);
+  const momoTotal = (cat) => Number(momo[cat]||0);
+  const categoryTotal = (cat) => cashTotal(cat)+momoTotal(cat);
+  const weekdayCashTotal = (entry) => DENOMS.reduce((s,d)=>s + d*Number(entry.counts?.[String(d)]||0),0);
+  const weekdayMomoTotal = (entry) => Number(entry.momo||0);
+  const weekdayEntryTotal = (entry) => weekdayCashTotal(entry)+weekdayMomoTotal(entry);
+  const weekdayTotal = weekdayEntries.reduce((s,e)=>s+weekdayEntryTotal(e),0);
+  const totalCash = STANDARD_CATS.reduce((s,c)=>s+cashTotal(c),0) + weekdayEntries.reduce((s,e)=>s+weekdayCashTotal(e),0);
+  const totalMomo = STANDARD_CATS.reduce((s,c)=>s+momoTotal(c),0) + weekdayEntries.reduce((s,e)=>s+weekdayMomoTotal(e),0);
+  const grandTotal = totalCash+totalMomo;
+
+  const setQty=(cat,d,v)=>setCounts(x=>({...x,[`${cat}|${d}`]:Math.max(0,Math.floor(Number(v)||0))}));
+  const setMomoValue=(cat,v)=>setMomo(x=>({...x,[cat]:v}));
+  const updateWeekday=(id,patch)=>setWeekdayEntries(xs=>xs.map(x=>x.id===id?{...x,...patch}:x));
+  const setWeekdayQty=(id,d,v)=>setWeekdayEntries(xs=>xs.map(x=>x.id===id?{...x,counts:{...x.counts,[String(d)]:Math.max(0,Math.floor(Number(v)||0))}}:x));
+  const addWeekdayCollection=()=>setWeekdayEntries(xs=>[...xs,emptyWeekdayEntry(date)]);
+  const removeWeekdayCollection=(id)=>setWeekdayEntries(xs=>xs.filter(x=>x.id!==id));
+
+  const saveWeekly = () => {
+    const id=reportId||uuid();
+    const row={id,date,week_no:Number(weekNo),year:Number(date.slice(0,4)),month:Number(date.slice(5,7)),status,notes,prepared_by_name:report?.prepared_by_name||profile?.full_name||'',checked_by_name:checkedBy,approved_by_name:approvedBy,total_cash:Number(totalCash.toFixed(2)),total_momo:Number(totalMomo.toFixed(2)),grand_total:Number(grandTotal.toFixed(2))};
+    save('finance_weekly_reports',row); setReportId(id); setReport(row);
+
+    const existingCash=cashRows.filter(x=>x.report_id===id); const existingStandardCash=existingCash.filter(x=>x.category!=='Weekday Offering');
+    STANDARD_CATS.forEach(cat=>DENOMS.forEach(d=>{ const qty=Number(counts[`${cat}|${d}`]||0); const old=existingStandardCash.find(x=>x.category===cat && Number(x.denomination)===Number(d)); if(qty>0){const rid=old?.id||uuid();save('finance_weekly_cash_counts',{id:rid,report_id:id,category:cat,denomination:d,quantity:qty});} else if(old) remove('finance_weekly_cash_counts',old.id); }));
+    existingCash.filter(x=>x.category==='Weekday Offering').forEach(x=>remove('finance_weekly_cash_counts',x.id));
+
+    const existingMomo=momoRows.filter(x=>x.report_id===id); const existingStandardMomo=existingMomo.filter(x=>x.category!=='Weekday Offering');
+    STANDARD_CATS.forEach(cat=>{const amount=Number(momo[cat]||0); const old=existingStandardMomo.find(x=>x.category===cat); if(amount>0){const rid=old?.id||uuid();save('finance_weekly_momo',{id:rid,report_id:id,category:cat,amount:Number(amount.toFixed(2)),reference:refs[cat]||'',provider:provider[cat]||''});} else if(old) remove('finance_weekly_momo',old.id);});
+    existingMomo.filter(x=>x.category==='Weekday Offering').forEach(x=>remove('finance_weekly_momo',x.id));
+
+    const existingCollections=weekdayRows.filter(x=>x.report_id===id);
+    const currentIds=new Set(weekdayEntries.map(x=>x.id));
+    existingCollections.filter(x=>!currentIds.has(x.id)).forEach(x=>remove('finance_weekday_collections',x.id));
+    existingCollections.filter(x=>!currentIds.has(x.id)).forEach(x=>weekdayCashRows.filter(y=>y.collection_id===x.id).forEach(y=>remove('finance_weekday_cash_counts',y.id)));
+    existingCollections.filter(x=>!currentIds.has(x.id)).forEach(x=>weekdayMomoRows.filter(y=>y.collection_id===x.id).forEach(y=>remove('finance_weekday_momo',y.id)));
+
+    weekdayEntries.forEach(entry=>{
+      save('finance_weekday_collections',{id:entry.id,report_id:id,collection_date:entry.collection_date||date,notes:entry.notes||''});
+      const oldCash=weekdayCashRows.filter(x=>x.collection_id===entry.id);
+      DENOMS.forEach(d=>{const qty=Number(entry.counts?.[String(d)]||0);const old=oldCash.find(x=>Number(x.denomination)===Number(d));if(qty>0){save('finance_weekday_cash_counts',{id:old?.id||uuid(),collection_id:entry.id,denomination:d,quantity:qty});}else if(old)remove('finance_weekday_cash_counts',old.id);});
+      const oldMomo=weekdayMomoRows.find(x=>x.collection_id===entry.id); const amount=Number(entry.momo||0);
+      if(amount>0){save('finance_weekday_momo',{id:oldMomo?.id||uuid(),collection_id:entry.id,amount:Number(amount.toFixed(2)),provider:entry.provider||'',reference:entry.reference||''});}
+      else if(oldMomo) remove('finance_weekday_momo',oldMomo.id);
+    });
+    setMsg(`Week ${weekNo} saved. Total: ${money(grandTotal)}.`);
+  };
+
+  const rowsForYear = reports.filter(r=>Number(r.year||String(r.date).slice(0,4))===Number(year));
+  const calcForReports = (list) => {
+    const out={};
+    list.forEach(r=>{
+      const cat={}; CATS.forEach(c=>cat[c]=0);
+      cashRows.filter(x=>x.report_id===r.id && x.category!=='Weekday Offering').forEach(x=>{cat[x.category]=(cat[x.category]||0)+Number(x.denomination||0)*Number(x.quantity||0);});
+      momoRows.filter(x=>x.report_id===r.id && x.category!=='Weekday Offering').forEach(x=>{cat[x.category]=(cat[x.category]||0)+Number(x.amount||0);});
+      weekdayRows.filter(x=>x.report_id===r.id).forEach(x=>{
+        weekdayCashRows.filter(y=>y.collection_id===x.id).forEach(y=>{cat['Weekday Offering']=(cat['Weekday Offering']||0)+Number(y.denomination||0)*Number(y.quantity||0);});
+        weekdayMomoRows.filter(y=>y.collection_id===x.id).forEach(y=>{cat['Weekday Offering']=(cat['Weekday Offering']||0)+Number(y.amount||0);});
+      });
+      out[r.id]=cat;
+    });
+    return out;
+  };
+  const calculated=calcForReports(rowsForYear);
+  const monthRows=MONTHS.map((name,i)=>{const rs=rowsForYear.filter(r=>Number(r.month||String(r.date).slice(5,7))===i+1);const vals={};CATS.forEach(c=>vals[c]=rs.reduce((s,r)=>s+Number(calculated[r.id]?.[c]||0),0));return {name,vals,total:CATS.reduce((s,c)=>s+vals[c],0)};});
+  const quarterRows=[0,1,2,3].map(q=>{const ms=monthRows.slice(q*3,q*3+3);const vals={};CATS.forEach(c=>vals[c]=ms.reduce((s,m)=>s+m.vals[c],0));return {label:`Q${q+1}`,vals,total:CATS.reduce((s,c)=>s+vals[c],0)};});
+  const yearVals={};CATS.forEach(c=>yearVals[c]=monthRows.reduce((s,m)=>s+m.vals[c],0)); const yearTotal=CATS.reduce((s,c)=>s+yearVals[c],0);
+
+  const SummaryTable=({rows,title})=><div className="panel"><h2>{title}</h2><div className="tablewrap"><table><thead><tr><th>Period</th>{CATS.map(c=><th key={c}>{c}</th>)}<th>Total</th></tr></thead><tbody>{rows.map(r=><tr key={r.name||r.label}><td><b>{r.name||r.label}</b></td>{CATS.map(c=><td key={c}>{money(r.vals[c])}</td>)}<td><b>{money(r.total)}</b></td></tr>)}</tbody></table></div></div>;
+
+  const WeekdayCollectionCard=({entry,index})=><div className="weekday-collection-card">
+    <div className="weekday-collection-head"><div><h3>Weekday Collection {index+1}</h3><span>Enter the actual collection date. Tuesday, Thursday or any special-program day is allowed.</span></div><div className="weekday-collection-total">{money(weekdayEntryTotal(entry))}</div></div>
+    <div className="weekday-meta-grid">
+      <div><label>Collection date</label><input type="date" value={entry.collection_date||date} onChange={e=>updateWeekday(entry.id,{collection_date:e.target.value})}/></div>
+      <div className="weekday-day-display"><label>Day</label><div>{entry.collection_date?new Date(`${entry.collection_date}T00:00:00`).toLocaleDateString(undefined,{weekday:'long'}):'—'}</div></div>
+      <div><label>Notes / program</label><input value={entry.notes||''} onChange={e=>updateWeekday(entry.id,{notes:e.target.value})} placeholder="e.g. Tuesday service / special program"/></div>
     </div>
-    <Crud table="pledges" title="Pledges and Projects" noun="pledge" sortKey="created_at" sortDir="desc" searchKeys={['member_name','project','reference']}
-      filters={[{key:'status',label:'All statuses',options:['Open','Part-paid','Paid','Cancelled']}]} defaults={{status:'Open',pledged_amount:0,paid_amount:0,currency:'GHS'}}
-      fields={[
-        {key:'member_name',label:'Member / donor',required:true},{key:'project',label:'Project / fund',required:true},{key:'pledged_amount',label:'Pledged amount',type:'number',required:true},{key:'paid_amount',label:'Amount paid',type:'number'},
-        {key:'pledge_date',label:'Pledge date',type:'date'},{key:'due_date',label:'Due date',type:'date'},{key:'status',label:'Status',type:'select',options:['Open','Part-paid','Paid','Cancelled'],required:true},{key:'reference',label:'Reference / receipt'},
-        {key:'notes',label:'Notes',type:'textarea',full:true}
-      ]}
-      columns={[{label:'Member',key:'member_name'},{label:'Project',key:'project'},{label:'Pledged',render:p=>money(p.pledged_amount)},{label:'Paid',render:p=>money(p.paid_amount)},{label:'Balance',render:p=>money(Number(p.pledged_amount||0)-Number(p.paid_amount||0))},{label:'Status',render:p=>badge(p.status)}]}
-    />
+    <div className="finance-denom-grid weekday-denom-grid">{DENOMS.map(d=><div className="finance-denom weekday-denom" key={d}>
+      <div className="finance-denom-name">GH₵ {d.toFixed(d<1?2:0)}</div>
+      <input className="finance-qty" aria-label={`Weekday collection GH₵ ${d} quantity`} type="number" min="0" step="1" value={entry.counts?.[String(d)]||''} onChange={e=>setWeekdayQty(entry.id,d,e.target.value)} placeholder="0" />
+      <div className="finance-denom-amount weekday-amount">{money(d*Number(entry.counts?.[String(d)]||0))}</div>
+    </div>)}</div>
+    <div className="finance-cash-total"><span>Cash total</span><b>{money(weekdayCashTotal(entry))}</b></div>
+    <div className="finance-momo-grid"><div><label>MoMo amount</label><input className="finance-entry finance-momo-input" type="number" min="0" step="0.01" value={entry.momo||''} onChange={e=>updateWeekday(entry.id,{momo:e.target.value})} placeholder="0.00"/></div><div><label>Provider</label><input className="finance-entry" value={entry.provider||''} onChange={e=>updateWeekday(entry.id,{provider:e.target.value})} placeholder="MTN / Telecel / AT"/></div><div><label>Reference</label><input className="finance-entry" value={entry.reference||''} onChange={e=>updateWeekday(entry.id,{reference:e.target.value})} placeholder="Optional"/></div></div>
+    <button type="button" className="weekday-remove" onClick={()=>removeWeekdayCollection(entry.id)}>Remove this collection</button>
+  </div>;
+
+  return <>
+    <div className="top"><div><h1>Church Finance</h1><div className="muted">Weekly cash-counting workflow based on the church finance workbook. Attendance remains in the Attendance module.</div></div></div>
+    <div className="toolbar" style={{marginBottom:12}}><button className={tab==='weekly'?'primary':''} onClick={()=>setTab('weekly')}>Weekly Cash Report</button><button className={tab==='monthly'?'primary':''} onClick={()=>setTab('monthly')}>Monthly</button><button className={tab==='quarterly'?'primary':''} onClick={()=>setTab('quarterly')}>Quarterly</button><button className={tab==='yearly'?'primary':''} onClick={()=>setTab('yearly')}>Yearly</button><button className={tab==='firstfruit'?'primary':''} onClick={()=>setTab('firstfruit')}>First Fruit Register</button><button className={tab==='receipts'?'primary':''} onClick={()=>setTab('receipts')}>Digital Receipts</button></div>
+    {tab==='weekly' && <>
+      <div className="panel finance-header-panel"><div className="formgrid finance-header-grid"><div><label>Report date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><div><label>Week number</label><select value={weekNo} onChange={e=>setWeekNo(Number(e.target.value))}>{[1,2,3,4,5].map(n=><option key={n} value={n}>Week {n}</option>)}</select></div><div><label>Status</label><select value={status} onChange={e=>setStatus(e.target.value)}><option>Draft</option><option>Submitted</option><option>Checked</option><option>Approved</option></select></div><div><label>Checked by</label><input value={checkedBy} onChange={e=>setCheckedBy(e.target.value)} /></div><div><label>Approved by / Head Pastor</label><input value={approvedBy} onChange={e=>setApprovedBy(e.target.value)} /></div><div><label>Notes</label><input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional notes" /></div></div></div>
+      <div className="finance-offering-grid">{STANDARD_CATS.map((cat,catIndex)=><div className={`finance-offering-card finance-offering-${catIndex%4}`} key={cat}>
+        <div className="finance-offering-head"><div><h2>{cat}</h2><span>Enter cash quantities below</span></div><strong>{money(categoryTotal(cat))}</strong></div>
+        <div className="finance-denom-grid">{DENOMS.map(d=><div className="finance-denom" key={d}>
+          <div className="finance-denom-name">GH₵ {d.toFixed(d<1?2:0)}</div>
+          <input className="finance-qty" aria-label={`${cat} GH₵ ${d} quantity`} type="number" min="0" step="1" value={counts[`${cat}|${d}`]||''} onChange={e=>setQty(cat,d,e.target.value)} placeholder="0" />
+          <div className="finance-denom-amount">{money(d*Number(counts[`${cat}|${d}`]||0))}</div>
+        </div>)}</div>
+        <div className="finance-cash-total"><span>Cash total</span><b>{money(cashTotal(cat))}</b></div>
+        <div className="finance-momo-grid"><div><label>MoMo amount</label><input className="finance-entry finance-momo-input" type="number" min="0" step="0.01" value={momo[cat]||''} onChange={e=>setMomoValue(cat,e.target.value)} placeholder="0.00" /></div><div><label>Provider</label><input className="finance-entry" value={provider[cat]||''} onChange={e=>setProvider(x=>({...x,[cat]:e.target.value}))} placeholder="MTN / Telecel / AT" /></div><div><label>Reference</label><input className="finance-entry" value={refs[cat]||''} onChange={e=>setRefs(x=>({...x,[cat]:e.target.value}))} placeholder="Optional" /></div></div>
+      </div>)}</div>
+
+      <div className="weekday-section">
+        <div className="weekday-section-head"><div><h2>Weekday Offering Collections</h2><p>Record each Tuesday, Thursday, or special-program collection separately. Add as many collection days as actually occurred during this week.</p></div><button type="button" className="primary" onClick={addWeekdayCollection}>＋ Add Collection</button></div>
+        {!weekdayEntries.length && <div className="weekday-empty">No weekday collection added yet. Use <b>＋ Add Collection</b> when a weekday offering was collected.</div>}
+        {weekdayEntries.map((entry,index)=><WeekdayCollectionCard entry={entry} index={index} key={entry.id}/>) }
+        {weekdayEntries.length>0 && <div className="weekday-grand-total"><span>Weekday Offering Total</span><b>{money(weekdayTotal)}</b></div>}
+      </div>
+
+      <div className="cards"><div className="card"><div className="label">Total cash</div><div className="num">{money(totalCash)}</div></div><div className="card"><div className="label">Total MoMo</div><div className="num">{money(totalMomo)}</div></div><div className="card"><div className="label">Weekly total</div><div className="num" style={{fontSize:22}}>{money(grandTotal)}</div></div></div>
+      <div className="toolbar"><button className="primary" onClick={saveWeekly}>Save weekly report</button>{msg&&<span className="muted">{msg}</span>}</div>
+    </>}
+    {tab==='monthly' && <><div className="panel"><div className="fld"><small>Year</small><input type="number" value={year} onChange={e=>setYear(Number(e.target.value)||year)} /></div></div><SummaryTable rows={monthRows} title={`Monthly Finance Summary · ${year}`} /></>}
+    {tab==='quarterly' && <><div className="panel"><div className="fld"><small>Year</small><input type="number" value={year} onChange={e=>setYear(Number(e.target.value)||year)} /></div></div><SummaryTable rows={quarterRows} title={`Quarterly Finance Summary · ${year}`} /></>}
+    {tab==='yearly' && <><div className="panel"><div className="fld"><small>Year</small><input type="number" value={year} onChange={e=>setYear(Number(e.target.value)||year)} /></div></div><SummaryTable rows={[{name:String(year),vals:yearVals,total:yearTotal}]} title={`Yearly Finance Report · ${year}`} /><div className="cards"><div className="card"><div className="label">Year total</div><div className="num" style={{fontSize:22}}>{money(yearTotal)}</div></div><div className="card"><div className="label">Monthly average</div><div className="num" style={{fontSize:22}}>{money(yearTotal/12)}</div></div></div></>}
+    {tab==='firstfruit' && <FirstFruit />}
+    {tab==='receipts' && <MemberGiving />}
   </>;
 }
 
 export function CommunicationCenter() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!isSuperAdmin(role) && !['secretary'].includes(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const active = data.members.filter(m=>m.status==='Active' && m.phone).length;
   const announcements = [...data.announcements].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))).slice(0,8);
   return <>
@@ -1860,7 +2193,7 @@ export function CommunicationCenter() {
 export function PastorDashboard() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!isSuperAdmin(role) && !['secretary','viewer'].includes(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
+  if (!['admin','secretary','viewer'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
   const openCases=data.pastoral_cases.filter(x=>!['Closed','Resolved'].includes(x.status)).length;
   const openFollow=data.follow_ups.filter(x=>['Open','In Progress'].includes(x.status)).length;
   const prayers=data.prayer_requests.filter(x=>!['Answered','Closed'].includes(x.status)).length;
@@ -1880,7 +2213,7 @@ export function PastorDashboard() {
 export function MemberGiving() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!isSuperAdmin(role) || ['finance','secretary'].includes(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
+  if (!['admin','finance','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
   const rows=[...(data.payment_receipts||[])].sort((a,b)=>String(b.paid_at||b.created_at).localeCompare(String(a.paid_at||a.created_at)));
   const paid=rows.filter(r=>r.status==='Paid').reduce((a,r)=>a+Number(r.amount||0),0);
   const pending=rows.filter(r=>r.status==='Pending').reduce((a,r)=>a+Number(r.amount||0),0);
@@ -1903,7 +2236,7 @@ export function MemberGiving() {
 export function EngagementAutomation() {
   const { data } = useData();
   const { role } = useAuth();
-  if (!isSuperAdmin(role) && !['secretary'].includes(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const templates=[...(data.communication_templates||[])].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
   const queue=[...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const birthdayCount=data.members.filter(m=>m.dob && String(m.dob).slice(5)===today().slice(5)).length;
@@ -1927,7 +2260,7 @@ export function EngagementAutomation() {
 export function FinanceReconciliation() {
   const { data, save } = useData();
   const { role } = useAuth();
-  if (!isSuperAdmin(role) && !['finance'].includes(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
+  if (!['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
   const [date,setDate]=useState(today());
   const [method,setMethod]=useState('All');
   const [note,setNote]=useState('');
@@ -1963,7 +2296,7 @@ export function FinanceReconciliation() {
 export function AutomationCenter() {
   const { data, save } = useData();
   const { role } = useAuth();
-  if (!isSuperAdmin(role) && !['secretary'].includes(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const [channel,setChannel]=useState('SMS');
   const [runMsg,setRunMsg]=useState('');
   const templates=(data.communication_templates||[]).filter(t=>t.active);
@@ -1991,72 +2324,176 @@ export function AutomationCenter() {
 }
 
 
-/* ---------------- V14 Advanced Reports + Branches ---------------- */
+/* ---------------- Advanced Reports + Exports ---------------- */
 export function AdvancedReports() {
   const { data } = useData();
   const { role } = useAuth();
-  const [period, setPeriod] = useState('12');
-  const months = Number(period);
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
-  const key = (d) => String(d || '').slice(0, 7);
-  const labels = Array.from({ length: months }, (_, i) => {
-    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  });
-  const activeMembers = (data.members||[]).filter(m => m.status !== 'Inactive');
-  const attendanceByMonth = Object.fromEntries(labels.map(x => [x, {present:0, visitor:0, absent:0, sessions:new Set()}]));
-  (data.attendance||[]).forEach(a => {
-    const k=key(a.date); if(!attendanceByMonth[k]) return;
-    if(a.status==='Present') attendanceByMonth[k].present++;
-    else if(a.status==='Visitor') attendanceByMonth[k].visitor++;
-    else if(a.status==='Absent') attendanceByMonth[k].absent++;
-    attendanceByMonth[k].sessions.add(`${a.date}|${a.service}`);
-  });
-  const eventByMonth = Object.fromEntries(labels.map(x=>[x,{events:0,registrations:0,attended:0}]));
-  (data.events||[]).forEach(e=>{const k=key(e.date);if(eventByMonth[k])eventByMonth[k].events++;});
-  (data.event_registrations||[]).forEach(r=>{const ev=(data.events||[]).find(e=>e.id===r.event_id);const k=key(ev?.date);if(eventByMonth[k])eventByMonth[k].registrations++;});
-  const monthRows=labels.map(k=>({month:k,...attendanceByMonth[k],...eventByMonth[k],sessions:attendanceByMonth[k].sessions.size}));
-  const recentSessions=[...new Set((data.attendance||[]).filter(a=>a.status==='Present').map(a=>`${a.date}|${a.service}`))].sort().reverse().slice(0,8);
-  const activeNames=new Set(activeMembers.map(m=>m.name));
-  const presentNames=new Set((data.attendance||[]).filter(a=>a.status==='Present' && recentSessions.includes(`${a.date}|${a.service}`)).map(a=>a.person_name));
-  const engaged=activeMembers.filter(m=>presentNames.has(m.name)).length;
-  const engagementRate=activeMembers.length ? Math.round(engaged/activeMembers.length*100) : 0;
+  const [tab, setTab] = useState('overview');
+  const [startDate, setStartDate] = useState(`${new Date().getFullYear()}-01-01`);
+  const [endDate, setEndDate] = useState(today());
+  const [memberId, setMemberId] = useState('all');
+  const [exportMsg, setExportMsg] = useState('');
+
+  const members = useMemo(() => [...(data.members || [])].sort(memberIdCompare), [data.members]);
+  const attendanceAccess = can(role, 'attendance', 'read');
+  const headcountAccess = can(role, 'attendance_headcount', 'read');
+  const welfareAccess = can(role, 'member_contributions', 'read');
+  const financeAccess = can(role, 'finance_weekly_reports', 'read');
+
+  const validRange = startDate && endDate && startDate <= endDate;
+  const inRange = (value) => {
+    const d = String(value || '').slice(0, 10);
+    return validRange && d >= startDate && d <= endDate;
+  };
+  const attendanceSummary = useMemo(() => {
+    if (!validRange) return { rows: [], attendanceDays: 0 };
+    const selectedMembers = memberId === 'all' ? members : members.filter(m => m.id === memberId);
+    const nameToId = new Map(members.map(m => [String(m.name || '').trim().toLowerCase(), m.id]));
+    const attendanceDaysSet = new Set();
+    const presentDatesByMember = new Map();
+
+    (data.attendance || []).forEach(a => {
+      if (!inRange(a.date)) return;
+      const date = String(a.date).slice(0, 10);
+      attendanceDaysSet.add(date);
+      let id = a.member_id;
+      if (!id && a.person_name) id = nameToId.get(String(a.person_name).trim().toLowerCase());
+      if (!id || (memberId !== 'all' && id !== memberId)) return;
+      if (a.status === 'Present') {
+        if (!presentDatesByMember.has(id)) presentDatesByMember.set(id, new Set());
+        presentDatesByMember.get(id).add(date);
+      }
+    });
+
+    const attendanceDays = attendanceDaysSet.size;
+    const rows = selectedMembers.map(m => {
+      const daysPresent = presentDatesByMember.get(m.id)?.size || 0;
+      const percent = attendanceDays ? Math.round((daysPresent / attendanceDays) * 100) : 0;
+      return {
+        'Member ID': m.member_code || '',
+        'Member Name': m.name || '',
+        'Current Status': m.status || '',
+        'Days Present': daysPresent,
+        'Attendance Days': attendanceDays,
+        'Present %': `${percent}%`,
+      };
+    });
+    return { rows, attendanceDays };
+  }, [data.attendance, members, memberId, startDate, endDate, validRange]);
+
+  const attendanceRows = attendanceSummary.rows;
+  const attendanceDays = attendanceSummary.attendanceDays;
+
+  const headcountRows = useMemo(() => {
+    if (!validRange) return [];
+    const grouped = new Map();
+    (data.attendance_headcount || []).filter(r => inRange(r.date)).forEach(r => {
+      const key = `${r.date}|${r.service}`;
+      if (!grouped.has(key)) grouped.set(key, { Date:r.date, Day:dayName(r.date), Service:r.service });
+      grouped.get(key)[headcountLabel(r.category)] = Number(r.count || 0);
+    });
+    return [...grouped.values()].sort((a,b) => String(a.Date).localeCompare(String(b.Date)) || String(a.Service).localeCompare(String(b.Service))).map(r => {
+      const total = HEADCOUNT_CATEGORIES.reduce((sum, c) => sum + Number(r[headcountLabel(c)] || 0), 0);
+      return {...r, Total:total};
+    });
+  }, [data.attendance_headcount, startDate, endDate, validRange]);
+
+  const welfareRows = useMemo(() => {
+    if (!validRange) return [];
+    const startMonth = startDate.slice(0,7), endMonth = endDate.slice(0,7);
+    const memberMap = new Map(members.map(m => [m.id, m]));
+    return (data.member_contributions || []).filter(r => {
+      if (r.fund !== 'Welfare Dues') return false;
+      const ym = `${r.year}-${String(r.month).padStart(2,'0')}`;
+      return ym >= startMonth && ym <= endMonth;
+    }).sort((a,b) => Number(a.year)-Number(b.year) || Number(a.month)-Number(b.month) || String(a.person_name).localeCompare(String(b.person_name))).map(r => {
+      const m = memberMap.get(r.member_id);
+      return {'Month':`${r.year}-${String(r.month).padStart(2,'0')}`,'Member ID':m?.member_code || '','Member Name':r.person_name || m?.name || '','Current Status':m?.status || '','Welfare Due':Number(r.amount || 0)};
+    });
+  }, [data.member_contributions, members, startDate, endDate, validRange]);
+
+  const financeRows = useMemo(() => {
+    if (!validRange) return [];
+    const reports = (data.finance_weekly_reports || []).filter(r => inRange(r.date));
+    const cashRows = data.finance_weekly_cash_counts || [];
+    const momoRows = data.finance_weekly_momo || [];
+    const weekdayRows = data.finance_weekday_collections || [];
+    const weekdayCashRows = data.finance_weekday_cash_counts || [];
+    const weekdayMomoRows = data.finance_weekday_momo || [];
+    return reports.sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(r => {
+      const vals = Object.fromEntries(OFFERING_CATEGORIES.map(c => [c, 0]));
+      cashRows.filter(x => x.report_id === r.id && x.category !== 'Weekday Offering').forEach(x => { vals[x.category] = (vals[x.category] || 0) + Number(x.denomination || 0) * Number(x.quantity || 0); });
+      momoRows.filter(x => x.report_id === r.id && x.category !== 'Weekday Offering').forEach(x => { vals[x.category] = (vals[x.category] || 0) + Number(x.amount || 0); });
+      weekdayRows.filter(x => x.report_id === r.id).forEach(x => {
+        weekdayCashRows.filter(y => y.collection_id === x.id).forEach(y => { vals['Weekday Offering'] += Number(y.denomination || 0) * Number(y.quantity || 0); });
+        weekdayMomoRows.filter(y => y.collection_id === x.id).forEach(y => { vals['Weekday Offering'] += Number(y.amount || 0); });
+      });
+      const out = {Date:r.date, Day:dayName(r.date), 'Week Number':r.week_no || '', Status:r.status || ''};
+      OFFERING_CATEGORIES.forEach(c => out[c] = Number((vals[c] || 0).toFixed(2)));
+      out.Total = OFFERING_CATEGORIES.reduce((sum,c)=>sum+Number(out[c]||0),0);
+      return out;
+    });
+  }, [data.finance_weekly_reports, data.finance_weekly_cash_counts, data.finance_weekly_momo, data.finance_weekday_collections, data.finance_weekday_cash_counts, data.finance_weekday_momo, startDate, endDate, validRange]);
+
+  const exportRows = (name, rows) => {
+    if (!rows.length) { setExportMsg(`No ${name} records found for the selected time range.`); return; }
+    downloadCSV(name.replace(/\s+/g,'-').toLowerCase(), rows);
+    setExportMsg(`${rows.length.toLocaleString()} ${name.toLowerCase()} row${rows.length === 1 ? '' : 's'} exported.`);
+  };
+
+  const recentSessions = [...new Set((data.attendance||[]).filter(a=>a.status==='Present' && inRange(a.date)).map(a=>`${a.date}|${a.service}`))].sort().reverse().slice(0,8);
+  const activeMembers = members.filter(m => !['Inactive','Left'].includes(m.status));
+  const presentIds = new Set((data.attendance||[]).filter(a=>a.status==='Present' && recentSessions.includes(`${a.date}|${a.service}`)).map(a=>a.member_id).filter(Boolean));
+  const engaged = activeMembers.filter(m=>presentIds.has(m.id)).length;
+  const engagementRate = activeMembers.length ? Math.round((engaged / activeMembers.length) * 100) : 0;
   const followupsOpen=(data.follow_ups||[]).filter(f=>['Open','In Progress'].includes(f.status)).length;
   const prayerOpen=(data.prayer_requests||[]).filter(p=>!['Answered','Closed'].includes(p.status)).length;
-  const visitorsMonth=(data.visitors||[]).filter(v=>key(v.visit_date)===key(now.toISOString())).length;
-  const showFinance=can(role,'giving','read');
-  const financeMonth=labels.map(k=>{
-    const giving=(data.giving||[]).filter(g=>key(g.date)===k).reduce((n,g)=>n+Number(g.amount||0),0);
-    const offering=(data.offering_entries||[]).filter(g=>key(g.date)===k).reduce((n,g)=>n+Number(g.amount||0),0);
-    return {month:k,giving,offering,total:giving+offering};
-  });
-  const downloadReport=()=>download(`advanced-report-${today()}.json`,JSON.stringify({generatedAt:new Date().toISOString(),periodMonths:months,summary:{activeMembers:activeMembers.length,engagementRate,openFollowUps:followupsOpen,openPrayerRequests:prayerOpen,visitorsThisMonth:visitorsMonth},monthlyAttendance:monthRows,monthlyFinance:showFinance?financeMonth:[]},null,2),'application/json');
+  const visitorsInRange=(data.visitors||[]).filter(v=>inRange(v.visit_date)).length;
+
   return <>
-    <div className="top"><div><h1>Advanced Reports</h1><div className="muted">Leadership overview of attendance, engagement, events and follow-up activity.</div></div><div className="btnrow"><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option></select><button className="secondary" onClick={downloadReport}>Export report</button></div></div>
-    <div className="cards">
-      <div className="card"><span className="label">Active members</span><strong>{activeMembers.length}</strong></div>
-      <div className="card"><span className="label">Recent engagement</span><strong>{engagementRate}%</strong><span className="muted sm">present in recent services</span></div>
-      <div className="card"><span className="label">Open follow-ups</span><strong>{followupsOpen}</strong></div>
-      <div className="card"><span className="label">Open prayer requests</span><strong>{prayerOpen}</strong></div>
-      <div className="card"><span className="label">Visitors this month</span><strong>{visitorsMonth}</strong></div>
+    <div className="top">
+      <div><h1>Advanced Reports</h1><div className="muted">Current reports and exports for attendance, headcount, welfare and Finance Center data.</div></div>
+      <div className="btnrow"><button className={tab==='overview'?'primary':'secondary'} onClick={()=>setTab('overview')}>Overview</button><button className={tab==='reports'?'primary':'secondary'} onClick={()=>setTab('reports')}>Reports</button></div>
     </div>
-    <div className="panel"><h2>Attendance trend</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Present</th><th>Visitors</th><th>Absent</th><th>Recorded services</th></tr></thead><tbody>{monthRows.map(r=><tr key={r.month}><td>{r.month}</td><td>{r.present}</td><td>{r.visitor}</td><td>{r.absent}</td><td>{r.sessions}</td></tr>)}</tbody></table></div></div>
-    <div className="grid2">
-      <div className="panel"><h2>Event activity</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Events</th><th>Registrations</th></tr></thead><tbody>{monthRows.map(r=><tr key={r.month}><td>{r.month}</td><td>{r.events}</td><td>{r.registrations}</td></tr>)}</tbody></table></div></div>
-      {showFinance&&<div className="panel"><h2>Finance trend</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Giving</th><th>Offering</th><th>Total</th></tr></thead><tbody>{financeMonth.map(r=><tr key={r.month}><td>{r.month}</td><td>{money(r.giving)}</td><td>{money(r.offering)}</td><td><b>{money(r.total)}</b></td></tr>)}</tbody></table></div></div>}
-    </div>
-    <div className="panel"><h2>Recent service engagement</h2><p className="muted">Active members: {activeMembers.length}. Members appearing as Present in at least one of the last {recentSessions.length} recorded services: {engaged}.</p><div className="tablewrap"><table><thead><tr><th>Member</th><th>Status</th><th>Recent attendance</th></tr></thead><tbody>{activeMembers.filter(m=>recentSessions.length && !presentNames.has(m.name)).slice(0,50).map(m=><tr key={m.id}><td>{m.name}</td><td>{m.status}</td><td className="muted">No Present mark in recent recorded services</td></tr>)}{(!recentSessions.length||!activeMembers.some(m=>!presentNames.has(m.name)))&&<tr><td colSpan="3" className="empty">No engagement gaps to display from the available attendance records.</td></tr>}</tbody></table></div></div>
+
+    {tab === 'overview' ? <>
+      <div className="cards">
+        <div className="card"><span className="label">Active members</span><strong>{activeMembers.length}</strong></div>
+        <div className="card"><span className="label">Recent engagement</span><strong>{engagementRate}%</strong><span className="muted sm">present in selected period</span></div>
+        <div className="card"><span className="label">Open follow-ups</span><strong>{followupsOpen}</strong></div>
+        <div className="card"><span className="label">Open prayer requests</span><strong>{prayerOpen}</strong></div>
+        <div className="card"><span className="label">Visitors in range</span><strong>{visitorsInRange}</strong></div>
+      </div>
+      <div className="panel"><h2>Recent service engagement</h2><p className="muted">Members with at least one Present record in the latest recorded services within the selected period.</p><div className="tablewrap"><table><thead><tr><th>Member</th><th>Status</th><th>Recent attendance</th></tr></thead><tbody>{activeMembers.filter(m=>recentSessions.length && !presentIds.has(m.id)).slice(0,50).map(m=><tr key={m.id}><td><b>{m.name}</b></td><td>{m.status}</td><td className="muted">No Present mark in recent recorded services</td></tr>)}{(!recentSessions.length||!activeMembers.some(m=>!presentIds.has(m.id)))&&<tr><td colSpan="3" className="empty">No engagement gaps to display from the available attendance records.</td></tr>}</tbody></table></div></div>
+    </> : <>
+      <div className="panel report-filter-panel">
+        <div className="report-filter-grid">
+          <div className="fld"><small>From</small><input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} /></div>
+          <div className="fld"><small>To</small><input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} /></div>
+          {attendanceAccess && <div className="fld"><small>Attendance member</small><select value={memberId} onChange={e=>setMemberId(e.target.value)}><option value="all">All members</option>{members.map(m=><option key={m.id} value={m.id}>{m.name}{m.member_code ? ` · ${m.member_code}` : ''}</option>)}</select></div>}
+        </div>
+        {!validRange && <div className="err">Choose a valid date range: the From date must be on or before the To date.</div>}
+        {exportMsg && <div className="success" style={{marginTop:8}}>{exportMsg}</div>}
+      </div>
+
+      {attendanceAccess && <div className="panel report-export-card"><div className="top report-export-head"><div><h2>Member Attendance</h2><p className="muted">One row per member. Days Present counts distinct attendance dates marked Present within the selected range. Present % = Days Present ÷ recorded attendance days in the selected range.</p>{validRange && <p className="muted sm"><b>{attendanceDays}</b> attendance day{attendanceDays===1?'':'s'} recorded from {startDate} to {endDate}.</p>}</div><button className="primary" disabled={!validRange} onClick={()=>exportRows('Member Attendance', attendanceRows)}>Export CSV</button></div><div className="tablewrap"><table><thead><tr><th>Member ID</th><th>Member</th><th>Status</th><th>Days Present</th><th>Attendance Days</th><th>Present %</th></tr></thead><tbody>{attendanceRows.slice(0,100).map((r,i)=><tr key={i}><td>{r['Member ID']}</td><td><b>{r['Member Name']}</b></td><td>{r['Current Status']}</td><td><b>{r['Days Present']}</b></td><td>{r['Attendance Days']}</td><td><b>{r['Present %']}</b></td></tr>)}{!attendanceRows.length&&<tr><td colSpan="6" className="empty">No members or attendance records match this range.</td></tr>}</tbody></table></div>{attendanceRows.length>100&&<p className="muted sm">Showing the first 100 members here; the CSV export contains all {attendanceRows.length.toLocaleString()} members.</p>}</div>}
+
+      {headcountAccess && <div className="panel report-export-card"><div className="top report-export-head"><div><h2>Headcount</h2><p className="muted">Export the demographic headcount breakdown by date and service.</p></div><button className="primary" disabled={!validRange} onClick={()=>exportRows('Headcount', headcountRows)}>Export CSV</button></div><div className="tablewrap"><table><thead><tr><th>Date</th><th>Day</th><th>Service</th>{HEADCOUNT_CATEGORIES.map(c=><th key={c}>{headcountLabel(c)}</th>)}<th>Total</th></tr></thead><tbody>{headcountRows.slice(0,50).map((r,i)=><tr key={i}><td>{r.Date}</td><td>{r.Day}</td><td>{r.Service}</td>{HEADCOUNT_CATEGORIES.map(c=><td key={c}>{r[headcountLabel(c)]||0}</td>)}<td><b>{r.Total}</b></td></tr>)}{!headcountRows.length&&<tr><td colSpan="10" className="empty">No headcount records match this range.</td></tr>}</tbody></table></div></div>}
+
+      {welfareAccess && <div className="panel report-export-card"><div className="top report-export-head"><div><h2>Welfare Due</h2><p className="muted">Export Welfare Dues contributions recorded by member and month.</p></div><button className="primary" disabled={!validRange} onClick={()=>exportRows('Welfare Due', welfareRows)}>Export CSV</button></div><div className="tablewrap"><table><thead><tr><th>Month</th><th>Member ID</th><th>Member</th><th>Status</th><th>Welfare Due</th></tr></thead><tbody>{welfareRows.slice(0,50).map((r,i)=><tr key={i}><td>{r.Month}</td><td>{r['Member ID']}</td><td><b>{r['Member Name']}</b></td><td>{r['Current Status']}</td><td><b>{money(r['Welfare Due'])}</b></td></tr>)}{!welfareRows.length&&<tr><td colSpan="5" className="empty">No Welfare Dues records match this range.</td></tr>}</tbody></table></div></div>}
+
+      {financeAccess && <div className="panel report-export-card"><div className="top report-export-head"><div><h2>Finance Center</h2><p className="muted">Export the current eight Finance Center headings for each weekly report in the selected time frame.</p></div><button className="primary" disabled={!validRange} onClick={()=>exportRows('Finance Center', financeRows)}>Export CSV</button></div><div className="tablewrap"><table><thead><tr><th>Date</th><th>Day</th><th>Week</th>{OFFERING_CATEGORIES.map(c=><th key={c}>{c}</th>)}<th>Total</th></tr></thead><tbody>{financeRows.slice(0,50).map((r,i)=><tr key={i}><td>{r.Date}</td><td>{r.Day}</td><td>{r['Week Number']}</td>{OFFERING_CATEGORIES.map(c=><td key={c}>{money(r[c])}</td>)}<td><b>{money(r.Total)}</b></td></tr>)}{!financeRows.length&&<tr><td colSpan="12" className="empty">No Finance Center reports match this range.</td></tr>}</tbody></table></div></div>}
+    </>}
   </>;
 }
 
 export function MobileMoneyPayments() {
   const { data, save } = useData();
   const { role } = useAuth();
-  const allowed = isSuperAdmin(role) || ['finance'].includes(role);
+  const allowed = ['admin','finance'];
   const [memberId,setMemberId]=useState(''); const [amount,setAmount]=useState(''); const [fund,setFund]=useState('Offering');
   const [phone,setPhone]=useState(''); const [provider,setProvider]=useState('mtn'); const [status,setStatus]=useState('');
-  if (!allowed) return <div className="panel"><h2>Mobile Money Payments</h2><p className="muted">Only administrators and finance users have access.</p></div>;
+  if (!allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Mobile Money Payments</h2><p className="muted">Only administrators and finance users have access.</p></div>;
   const members=(data.members||[]).filter(m=>m.status!=='Inactive').sort((a,b)=>String(a.name).localeCompare(String(b.name)));
   const requests=[...(data.payment_requests||[])].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,50);
   const createRequest=async()=>{ const m=members.find(x=>x.id===memberId); const n=Number(amount);
@@ -2089,7 +2526,7 @@ export function DeliveryCenter() {
   const { role } = useAuth();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const allowed = isSuperAdmin(role) || role === 'secretary';
+  const allowed = ['admin','secretary'].includes(role) || isSuperAdmin(role);
   const queue = [...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const queued = queue.filter(q=>q.status==='Queued');
   const failed = queue.filter(q=>q.status==='Failed');
@@ -2119,14 +2556,14 @@ export function DeliveryCenter() {
 export function NotificationCenter() {
   const { data, save } = useData();
   const { role } = useAuth();
-  const allowed = isSuperAdmin(role) || ['secretary'].includes(role);
+  const allowed = ['admin','secretary'];
   const [channel,setChannel] = useState('In-app');
   const [audience,setAudience] = useState('All Members');
   const [title,setTitle] = useState('');
   const [message,setMessage] = useState('');
   const [schedule,setSchedule] = useState('');
   const [status,setStatus] = useState('');
-  if (!allowed) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
 
   const members=(data.members||[]).filter(m=>m.status!=='Inactive');
   const targetMembers = useMemo(() => {
