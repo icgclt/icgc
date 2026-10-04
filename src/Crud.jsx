@@ -1,13 +1,63 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth, can } from './auth';
 import { useData } from './data';
+import { supabase } from './supabase';
 import { uuid } from './utils';
+
+export function StoragePhoto({ path, bucket = 'member-photos', size = 42, alt = 'Member photo' }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    let active = true;
+    if (!path) { setUrl(null); return () => { active = false; }; }
+    if (typeof path === 'string' && /^https?:\/\//i.test(path)) { setUrl(path); return () => { active = false; }; }
+    supabase.storage.from(bucket).createSignedUrl(path, 3600).then(({ data }) => { if (active) setUrl(data?.signedUrl || null); });
+    return () => { active = false; };
+  }, [path, bucket]);
+  return url ? <img loading="lazy" decoding="async" src={url} alt={alt} style={{ width: size, height: Math.round(size * 1.25), objectFit: 'cover', borderRadius: 6, display: 'block' }} /> : <div className="photo-thumb-placeholder" style={{ width: size, height: Math.round(size * 1.25) }}>👤</div>;
+}
+
+function PhotoField({ f, value, onChange, error }) {
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    let active = true;
+    let objectUrl = null;
+    const load = async () => {
+      if (value instanceof File) {
+        objectUrl = URL.createObjectURL(value);
+        if (active) setPreview(objectUrl);
+        return;
+      }
+      if (!value) { if (active) setPreview(null); return; }
+      if (typeof value === 'string' && /^https?:\/\//i.test(value)) { if (active) setPreview(value); return; }
+      setLoading(true);
+      const { data } = await supabase.storage.from(f.bucket || 'member-photos').createSignedUrl(value, 3600);
+      if (active) { setPreview(data?.signedUrl || null); setLoading(false); }
+    };
+    load();
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [value, f.bucket]);
+
+  return <div className={f.full ? 'full' : ''}>
+    <label htmlFor={'f_' + f.key}>{f.label}</label>
+    <div className="photo-field">
+      <div className="photo-preview">{preview ? <img src={preview} alt="Member passport photo" /> : <span>{loading ? 'Loading…' : 'No photo'}</span>}</div>
+      <div className="photo-actions">
+        <input id={'f_' + f.key} type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) onChange(file); }} />
+        {value && <button type="button" className="secondary sm" onClick={() => onChange(null)}>Remove photo</button>}
+        <div className="muted sm">Passport photo is resized and compressed before upload. Maximum source size: 5 MB.</div>
+      </div>
+    </div>
+    {error && <div className="err">{error}</div>}
+  </div>;
+}
 
 function Field({ f, value, error, onChange, list, members }) {
   const common = { id: 'f_' + f.key, value: value ?? '', onChange: (e) => onChange(e.target.value) };
+  if (f.type === 'photo') return <PhotoField f={f} value={value} onChange={onChange} error={error} />;
   let input;
   if (f.type === 'member') {
-    input = <select {...common}><option value="">Search/select member</option>{(members || []).filter(m => m.status !== 'Inactive').sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(m => <option key={m.id} value={m.id}>{m.member_code || 'No ID'} · {m.name}{m.phone ? ` · ${m.phone}` : ''}</option>)}</select>;
+    input = <select {...common}><option value="">Search/select member</option>{(members || []).filter(m => !['Inactive', 'Left'].includes(m.status)).sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(m => <option key={m.id} value={m.id}>{m.member_code || 'No ID'} · {m.name}{m.phone ? ` · ${m.phone}` : ''}</option>)}</select>;
   } else if (f.type === 'select') {
     input = (
       <select {...common}>
@@ -43,9 +93,43 @@ function Field({ f, value, error, onChange, list, members }) {
   );
 }
 
+async function compressMemberPhoto(file, maxWidth = 300, maxHeight = 400, quality = 0.78) {
+  if (!(file instanceof File)) return file;
+  if (!file.type.startsWith('image/')) throw new Error('Please choose a JPG, PNG or WebP image.');
+  if (file.size > 5 * 1024 * 1024) throw new Error('The selected photo is larger than 5 MB. Please choose a smaller image.');
+  const bitmap = await createImageBitmap(file);
+  const targetRatio = maxWidth / maxHeight;
+  const sourceRatio = bitmap.width / bitmap.height;
+  let cropW = bitmap.width;
+  let cropH = bitmap.height;
+  let sx = 0;
+  let sy = 0;
+  if (sourceRatio > targetRatio) {
+    cropW = Math.round(bitmap.height * targetRatio);
+    sx = Math.round((bitmap.width - cropW) / 2);
+  } else if (sourceRatio < targetRatio) {
+    cropH = Math.round(bitmap.width / targetRatio);
+    sy = Math.round((bitmap.height - cropH) / 2);
+  }
+  const scale = Math.min(maxWidth / cropW, maxHeight / cropH);
+  const width = Math.max(1, Math.round(cropW * scale));
+  const height = Math.max(1, Math.round(cropH * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, sx, sy, cropW, cropH, 0, 0, width, height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+  if (!blob) throw new Error('Could not process the photo. Please try another image.');
+  return new File([blob], 'passport.jpg', { type: 'image/jpeg', lastModified: Date.now() });
+}
+
 export default function Crud({
   table, title, noun, fields, columns,
-  filters = [], searchKeys = [], sortKey, sortDir = 'asc', defaults = {}, suggest = {}, onSaved, prepareRecord,
+  filters = [], searchKeys = [], sortKey, sortDir = 'asc', sortCompare, defaults = {}, suggest = {}, onSaved, onDeleted, prepareRecord,
 }) {
   const { data, save, remove } = useData();
   const { role } = useAuth();
@@ -71,14 +155,17 @@ export default function Crud({
     if (sortKey) {
       const dir = sortDir === 'desc' ? -1 : 1;
       r = [...r].sort(
-        (a, b) =>
-          String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? '')) * dir ||
-          String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')),
+        (a, b) => {
+          const primary = sortCompare
+            ? sortCompare(a, b)
+            : String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? ''));
+          return primary * dir || String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''));
+        },
       );
     }
     return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, table, q, fv]);
+  }, [data, table, q, fv, sortKey, sortDir, sortCompare]);
 
   const openForm = (row) => {
     const values = {};
@@ -86,7 +173,7 @@ export default function Crud({
     setForm({ original: row || null, values, errors: {} });
   };
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     const errors = {};
     const out = {};
@@ -123,7 +210,34 @@ export default function Crud({
     const recordId = form.original?.id || uuid();
     let record = { ...(form.original || {}), ...out, id: recordId };
     if (prepareRecord) record = prepareRecord(record, form.original || null) || record;
-    save(table, record);
+
+    // Photo fields are uploaded to Supabase Storage, never stored as binary data in PostgreSQL.
+    for (const f of fields.filter((x) => x.type === 'photo')) {
+      const photoValue = form.values[f.key];
+      const bucket = f.bucket || 'member-photos';
+      const oldPath = form.original?.[f.key] || null;
+      if (photoValue instanceof File) {
+        const compressed = await compressMemberPhoto(photoValue, f.maxWidth || 300, f.maxHeight || 400, f.quality || 0.78);
+        const path = `${recordId}/passport.jpg`;
+        const { error: uploadError } = await supabase.storage.from(bucket).upload(path, compressed, {
+          upsert: true, contentType: 'image/jpeg', cacheControl: '31536000',
+        });
+        if (uploadError) throw new Error(`Photo upload failed: ${uploadError.message}`);
+        record[f.key] = path;
+        if (oldPath && oldPath !== path && !/^https?:\/\//i.test(oldPath)) await supabase.storage.from(bucket).remove([oldPath]);
+      } else if (photoValue === null && oldPath) {
+        if (/^https?:\/\//i.test(oldPath)) { record[f.key] = null; }
+        const { error: removeError } = /^https?:\/\//i.test(oldPath) ? { error: null } : await supabase.storage.from(bucket).remove([oldPath]);
+        if (removeError) throw new Error(`Could not remove the old photo: ${removeError.message}`);
+        record[f.key] = null;
+      }
+    }
+
+    const result = save(table, record);
+    if (result?.duplicate) {
+      setForm({ ...form, errors: { ...form.errors, person_name: result.error?.message || 'Attendance has already been marked for this person today.' } });
+      return;
+    }
     if (onSaved) onSaved(record, form.original || null);
     setForm(null);
   };
@@ -171,7 +285,7 @@ export default function Crud({
                     <td className="actions">
                       {canWrite && <button className="secondary" onClick={() => openForm(r)}>Edit</button>}
                       {canDel && (
-                        <button className="danger" onClick={() => { if (confirm('Delete this record?')) remove(table, r.id); }}>
+                        <button className="danger" onClick={() => { if (confirm('Delete this record?')) { remove(table, r.id); if (onDeleted) onDeleted(r); } }}>
                           Delete
                         </button>
                       )}
@@ -193,7 +307,7 @@ export default function Crud({
 
       {form && (
         <div className="modal show" onMouseDown={(e) => { if (e.target === e.currentTarget) setForm(null); }}>
-          <form className="modalbox" onSubmit={submit}>
+          <form className="modalbox" onSubmit={(e) => submit(e).catch((err) => setForm((current) => current ? { ...current, errors: { ...current.errors, __photo: err?.message || 'Photo upload failed' } } : current))}>
             <div className="modalhead">
               <h2>{form.original ? 'Edit' : 'Add'} {noun}</h2>
               <button type="button" className="x" onClick={() => setForm(null)}>×</button>
@@ -211,6 +325,7 @@ export default function Crud({
                 />
               ))}
             </div>
+            {form.errors.__photo && <div className="err" style={{ marginTop: 8 }}>{form.errors.__photo}</div>}
             <br />
             <button type="submit" className="primary">Save</button>
           </form>

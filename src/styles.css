@@ -25,6 +25,9 @@ code,pre{background:#eef2f6;border-radius:6px;padding:2px 5px;font-size:13px}pre
 .card .label{color:var(--muted);font-size:13px}.card .num{font-size:28px;font-weight:800;margin-top:7px}
 .panel{background:#fff;border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:18px}.panel h2{font-size:18px;margin:0 0 14px}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:flex-end}.toolbar>input,.toolbar>select{flex:1;min-width:160px}
+.portal-account-launcher{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1.2fr) auto;gap:10px;align-items:start}.portal-account-launcher>div{min-width:0}.portal-account-launcher>input,.portal-account-launcher>button{min-height:42px}
+@media(max-width:900px){.portal-account-launcher{grid-template-columns:1fr 1fr}.portal-account-launcher>button{grid-column:1/-1;width:100%}}
+@media(max-width:560px){.portal-account-launcher{grid-template-columns:1fr}}
 .fld{display:flex;flex-direction:column}.fld small{color:var(--muted);margin-bottom:2px}
 input,select,textarea{border:1px solid var(--border);border-radius:8px;padding:10px;font:inherit;background:#fff;max-width:100%}textarea{min-height:80px;width:100%}
 .formgrid input,.formgrid select{width:100%}
@@ -83,3 +86,109 @@ td.actions{white-space:nowrap}td.actions button{margin-right:6px;padding:6px 10p
 button.danger { background: #b91c1c; color: #fff; border: 1px solid #991b1b; }
 button.danger:hover { background: #991b1b; }
 button.danger:disabled { opacity: .55; cursor: not-allowed; }
+
+.photo-field { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.photo-preview { width: 96px; height: 120px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2, #f5f7fa); display: flex; align-items: center; justify-content: center; color: var(--muted, #667085); }
+.photo-preview img { width: 100%; height: 100%; object-fit: cover; }
+.photo-actions { display: grid; gap: 8px; min-width: 240px; }
+.photo-thumb-placeholder { border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; background: var(--surface-2, #f5f7fa); font-size: 18px; }
+.attendance-check-row{cursor:default}
+.attendance-check-main{display:flex;align-items:center;gap:10px;min-width:0}
+.attendance-check-main input{width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
+.quickstatus{border:0;cursor:pointer}
+
+/* Finance Center compact workbook-style entry cards */
+.finance-offering-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:8px}
+.finance-offering-card{border:1px solid #d8e2ec;border-radius:14px;padding:12px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);box-shadow:0 3px 12px rgba(36,59,83,.07)}
+.finance-offering-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:2px 2px 10px;border-bottom:1px solid #e8eef5}
+.finance-offering-head h2{margin:0;font-size:17px;color:#183b63}
+.finance-offering-head span{font-size:11px;color:#718096}
+.finance-offering-head strong{font-size:16px;color:#126b52;background:#e8f7f0;border:1px solid #c7eadb;border-radius:20px;padding:5px 9px;white-space:nowrap}
+.finance-denom-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:10px}
+.finance-denom{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:7px 6px;text-align:center;min-width:0}
+.finance-denom-name{font-size:11px;font-weight:800;color:#52667b;margin-bottom:5px}
+.finance-qty{width:100%!important;max-width:none!important;padding:6px 4px!important;text-align:center;background:#eef6ff!important;border:1px solid #b9d7f5!important;color:#174a7c;font-weight:700;font-size:13px!important;border-radius:7px!important}
+.finance-qty:focus,.finance-entry:focus{outline:none;border-color:#2f80ed!important;box-shadow:0 0 0 2px rgba(47,128,237,.12)}
+.finance-denom-amount{font-size:10px;color:#7b8794;margin-top:4px;min-height:13px}
+.finance-cash-total{display:flex;justify-content:space-between;align-items:center;margin-top:9px;padding:7px 9px;border-radius:8px;background:#f0f7ff;color:#365a7c;font-size:12px}
+.finance-cash-total b{font-size:14px;color:#174a7c}
+.finance-momo-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:9px;padding-top:9px;border-top:1px dashed #d9e2ec}
+.finance-momo-grid label{font-size:10px;margin-bottom:3px;color:#687b90}
+.finance-entry{width:100%!important;padding:7px 8px!important;background:#fff8e8!important;border:1px solid #efd59b!important;font-size:12px!important;border-radius:7px!important}
+.finance-momo-input{background:#eefaf5!important;border-color:#b9dfcf!important;color:#176b52}
+.finance-offering-1{background:linear-gradient(180deg,#fff 0%,#fbf9ff 100%)}
+.finance-offering-1 .finance-qty{background:#f3efff!important;border-color:#cfc1f4!important;color:#5b3f91}
+.finance-offering-2{background:linear-gradient(180deg,#fff 0%,#fffaf5 100%)}
+.finance-offering-2 .finance-qty{background:#fff3e8!important;border-color:#f2cda8!important;color:#8a4f19}
+.finance-offering-3{background:linear-gradient(180deg,#fff 0%,#f7fcfa 100%)}
+.finance-offering-3 .finance-qty{background:#edf9f3!important;border-color:#b9dfca!important;color:#176b52}
+@media(max-width:1100px){.finance-offering-grid{grid-template-columns:1fr 1fr}.finance-denom-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:850px){.finance-offering-grid{grid-template-columns:1fr}.finance-denom-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.finance-momo-grid{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:560px){.finance-denom-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.finance-momo-grid{grid-template-columns:1fr}.finance-offering-card{padding:10px}}
+
+/* Finance readability: make the actual calculated denomination amount prominent. */
+.finance-denom-amount{font-size:14px;font-weight:900;color:#173f68;margin-top:5px;min-height:18px;letter-spacing:-.1px}
+.finance-denom-amount::first-letter{font-weight:900}
+.finance-offering-1 .finance-denom-amount{color:#5b3f91}
+.finance-offering-2 .finance-denom-amount{color:#8a4f19}
+.finance-offering-3 .finance-denom-amount{color:#176b52}
+
+/* Weekday Offering is a set of real collections on separate dates. */
+.weekday-section{margin-top:16px;border:1px solid #d8e2ec;border-radius:14px;padding:14px;background:linear-gradient(180deg,#ffffff 0%,#f7fbff 100%);box-shadow:0 3px 12px rgba(36,59,83,.07)}
+.weekday-section-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:12px}
+.weekday-section-head h2{margin:0 0 3px;font-size:19px;color:#183b63}
+.weekday-section-head p{margin:0;color:#718096;font-size:12px;line-height:1.45}
+.weekday-empty{padding:14px;border:1px dashed #b9cbe0;border-radius:10px;background:#f8fbff;color:#65788d;font-size:13px}
+.weekday-collection-card{border:1px solid #d9e5ef;border-radius:12px;padding:11px;margin-top:12px;background:#fff}
+.weekday-collection-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding-bottom:9px;border-bottom:1px solid #e8eef5}
+.weekday-collection-head h3{margin:0;color:#214e78;font-size:15px}
+.weekday-collection-head span{display:block;color:#718096;font-size:10px;margin-top:2px}
+.weekday-collection-total{font-size:16px;font-weight:900;color:#176b52;background:#e8f7f0;border:1px solid #c7eadb;border-radius:18px;padding:5px 9px;white-space:nowrap}
+.weekday-meta-grid{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px;margin-top:9px}
+.weekday-meta-grid label{display:block;font-size:10px;color:#687b90;margin-bottom:3px}
+.weekday-meta-grid input{width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #cddae7;border-radius:7px;background:#fbfdff;font-size:12px}
+.weekday-day-display>div{padding:7px 8px;border-radius:7px;background:#eef6ff;border:1px solid #c5d9ed;color:#285b86;font-weight:800;font-size:12px;min-height:16px}
+.weekday-denom-grid{margin-top:10px}
+.weekday-amount{font-size:13px}
+.weekday-remove{margin-top:9px;border:1px solid #e7b6b6;background:#fff5f5;color:#a33a3a;border-radius:7px;padding:6px 9px;font-size:11px;cursor:pointer}
+.weekday-remove:hover{background:#ffecec}
+.weekday-grand-total{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:9px 11px;border-radius:9px;background:#eaf7f1;border:1px solid #c9e8da;color:#205f4a;font-size:13px}
+.weekday-grand-total b{font-size:18px;color:#126b52}
+@media(max-width:850px){.weekday-meta-grid{grid-template-columns:1fr 1fr}.weekday-meta-grid>div:last-child{grid-column:1/-1}}
+@media(max-width:560px){.weekday-section-head{align-items:flex-start;flex-direction:column}.weekday-meta-grid{grid-template-columns:1fr}}
+
+/* Compact checkbox attendance restored for grouped quick attendance. */
+.quick-groups{display:grid;gap:14px;margin-top:14px}
+.quick-group{border:1px solid #d9e3ec;border-radius:12px;background:#fff;overflow:hidden}
+.quick-group-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:#f5f9fc;border-bottom:1px solid #e3ebf2}
+.quick-group-head h3{margin:0;font-size:15px;color:#183b63}
+.quick-group-head small{color:#718096}
+.quick-check-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px;padding:4px 12px}
+.quick-check-row{display:flex;align-items:center;gap:7px;padding:6px 4px;border-bottom:1px solid #edf2f7;cursor:pointer;min-height:35px;box-sizing:border-box}
+.quick-check-row input{width:14px;height:14px;min-width:14px;accent-color:var(--accent);cursor:pointer}
+.quick-check-photo{width:28px;height:35px;min-width:28px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.quick-check-info{min-width:0;flex:1}
+.quick-check-row b{display:block;font-size:13px;line-height:1.15}
+.quick-check-row small{display:block;color:#718096;font-size:10px;line-height:1.15;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:760px){.quick-check-grid{grid-template-columns:1fr}.quick-group-head{align-items:flex-start;flex-direction:column}.quick-group-head>div:last-child{width:100%}}
+
+/* Navigation polish: keep icons compact without shrinking the menu text. */
+.navicon{display:inline-flex;align-items:center;justify-content:center;width:17px;margin-right:4px;font-size:12px;line-height:1;vertical-align:-1px}
+.nav .grouphead .navicon{font-size:12px}
+.nav button.sub .navicon{font-size:11px}
+.finance-notes{margin-top:2px}
+
+/* Compact Role Permissions: smaller icons, headings, checkboxes and spacing. */
+.permission-role-card{padding:12px;margin-bottom:10px}.permission-role-card label{font-size:11px;margin-bottom:3px}.permission-role-card select{padding:7px 9px;font-size:13px;max-width:360px}.permission-role-card .muted{margin:5px 0 0;font-size:11px}
+.permission-module{padding:10px 12px;margin-top:8px;margin-bottom:8px;border-radius:9px}.permission-module h2{font-size:14px;margin:0 0 7px;text-transform:none}.permission-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 14px}.permission-row{display:flex;align-items:center;gap:7px;cursor:pointer;margin:0;padding:5px 4px;border-radius:6px}.permission-row:hover{background:#f5f8fb}.permission-row input{width:14px;height:14px;margin:0;flex:0 0 auto}.permission-row span{min-width:0}.permission-row strong{display:block;font-size:12px;line-height:1.2;color:var(--text)}.permission-row small{display:block;font-size:10px;line-height:1.2;margin-top:1px}.permission-module + .permission-module{margin-top:6px}
+
+/* V39.1: compact Finance header and Role Permissions layout */
+.finance-header-panel{padding:12px;margin-top:10px}.finance-header-grid{gap:8px}.finance-header-grid label{font-size:12px;margin-bottom:3px}.finance-header-grid input,.finance-header-grid select{padding:8px 9px;font-size:13px}
+.permissions-page>h1{font-size:24px;margin:0 0 5px}.permissions-intro{font-size:12px;margin:0 0 10px}.permissions-page .permission-role-card{padding:9px 10px;margin:0 0 8px}.permissions-page .permission-role-card select{max-width:300px;padding:6px 8px;font-size:12px}.permissions-page .permission-module{padding:8px 10px;margin:6px 0;border-radius:8px}.permissions-page .permission-module h2{font-size:13px;margin:0 0 5px}.permissions-page .permission-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 10px}.permissions-page .permission-row{gap:6px;padding:4px 3px}.permissions-page .permission-row input{width:13px;height:13px}.permissions-page .permission-row strong{font-size:11px;line-height:1.15}.permissions-page .permission-row small{font-size:9px;line-height:1.15;margin-top:1px}.permissions-page .primary{padding:8px 12px;font-size:12px}@media(max-width:1000px){.permissions-page .permission-list{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.permissions-page .permission-list{grid-template-columns:1fr}}
+
+
+/* V40: church logo */
+.brand{display:flex;align-items:center;gap:9px}.brand img{width:44px;height:44px;object-fit:contain;flex:0 0 44px}.brand>div{min-width:0}.brand strong{display:block;font-size:17px;line-height:1.15}.login-brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:8px}.login-brand img{width:62px;height:62px;object-fit:contain}.login-brand h1{margin:0}
+
+/* V40: compact Advanced Reports / exports */
+.report-filter-panel{padding:12px;margin-bottom:10px}.report-filter-grid{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px;align-items:end}.report-filter-grid .fld small{font-size:11px}.report-filter-grid input,.report-filter-grid select{padding:8px 9px;font-size:13px}.report-export-card{padding:12px;margin-top:10px}.report-export-head{margin:0 0 8px;align-items:center}.report-export-head h2{margin:0 0 2px;font-size:16px}.report-export-head p{margin:0;font-size:11px}.report-export-card table{font-size:11px}.report-export-card th,.report-export-card td{padding:5px 6px}.report-export-card .primary{padding:7px 10px;font-size:12px;white-space:nowrap}@media(max-width:760px){.report-filter-grid{grid-template-columns:1fr 1fr}.report-filter-grid .fld:last-child{grid-column:1/-1}}@media(max-width:520px){.report-filter-grid{grid-template-columns:1fr}.report-filter-grid .fld:last-child{grid-column:auto}.report-export-head{align-items:flex-start;flex-direction:column}}

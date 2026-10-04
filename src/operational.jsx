@@ -9,7 +9,7 @@ export function MemberCards() {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState(null);
   const [qr, setQr] = useState('');
-  const members = useMemo(() => data.members.filter(m => m.status !== 'Inactive' && (!q || String(m.name||'').toLowerCase().includes(q.toLowerCase()) || String(m.member_code||'').toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>String(a.name).localeCompare(String(b.name))), [data.members,q]);
+  const members = useMemo(() => data.members.filter(m => !['Inactive', 'Left'].includes(m.status) && (!q || String(m.name||'').toLowerCase().includes(q.toLowerCase()) || String(m.member_code||'').toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>String(a.name).localeCompare(String(b.name))), [data.members,q]);
   useEffect(() => { if (!selected?.member_code) { setQr(''); return; } const payload = encodeURIComponent(`CHURCH-MEMBER:${selected.member_code}`); setQr(`https://quickchart.io/qr?text=${payload}&size=240`); }, [selected]);
   function printCard() { window.print(); }
   return <>
@@ -28,7 +28,7 @@ export function DepartmentDashboard() {
   const members = data.department_members || [];
   const current = departments.find(d=>d.id===selected) || departments[0];
   const rows = current ? members.filter(x=>x.department_id===current.id) : [];
-  const active = rows.filter(x=>x.status !== 'Inactive').length;
+  const active = rows.filter(x=>!['Inactive', 'Left'].includes(x.status)).length;
   const names = new Map(data.members.map(m=>[m.id,m.name]));
   return <>
     <div className="top"><div><h1>Department Dashboard</h1><div className="muted">Membership, attendance and leadership overview by department.</div></div><select value={current?.id||''} onChange={e=>setSelected(e.target.value)}><option value="">Select department</option>{departments.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
