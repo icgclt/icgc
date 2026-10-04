@@ -3,7 +3,7 @@ import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
 import { useData, TABLES } from './data';
 import { supabase } from './supabase';
 import Crud, { StoragePhoto } from './Crud';
-import { money, today, downloadCSV, download, parseCSV, uuid } from './utils';
+import { money, today, downloadCSV, download, parseCSV, uuid, upcomingEvents as pickUpcomingEvents, eventInProgress } from './utils';
 
 const STATUS = ['Active', 'Inactive', 'Visitor', 'Left'];
 const SERVICES = ['Sunday Service', 'Bible Study', 'Prayer Meeting', 'Special Program', 'Other'];
@@ -106,7 +106,10 @@ export function Dashboard() {
   const presentTable = notLinked.total ? [...presentBreakdown, notLinked] : presentBreakdown;
   const noGenderPresentNames = [...noGenderPresent.values()].sort(memberIdCompare).map(labelOf);
   const genderHint = 'Open Members, find the person, edit and choose Male or Female.';
-  const upcoming = data.events.filter((e) => e.date >= today()).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
+  // Events that have already finished (including earlier today) drop off; re-check every minute.
+  const [, setTick] = useState(0);
+  useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(id); }, []);
+  const upcoming = pickUpcomingEvents(data.events).slice(0, 5);
   const recent = [...data.members].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 5);
 
   return (
@@ -152,7 +155,7 @@ export function Dashboard() {
         <div className="panel">
           <h2>Upcoming events</h2>
           {upcoming.length ? upcoming.map((e) => (
-            <p key={e.id}><b>{e.title}</b><br /><span className="muted">{e.date} · {dayName(e.date)}{e.event_time ? ` · ${e.event_time}` : ''}{e.location ? ` · ${e.location}` : ''}</span></p>
+            <p key={e.id}><b>{e.title}</b>{eventInProgress(e) && <span className="badge" style={{ marginLeft: 8 }}>Happening now</span>}<br /><span className="muted">{e.date} · {dayName(e.date)}{e.event_time ? ` · ${e.event_time}` : ''}{e.location ? ` · ${e.location}` : ''}</span></p>
           )) : <div className="empty">No upcoming events.</div>}
         </div>
       </div>

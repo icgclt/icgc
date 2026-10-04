@@ -15,6 +15,84 @@ export function today() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// ---- Event times -------------------------------------------------------------------------------
+// Events keep their time as free text ("8:00-10:30am", "6:00pm - 7:30pm", "9am", "18:00-19:30").
+// eventTimeRange() turns that into minutes since midnight so the app knows when an event ends.
+// Returns { startMin, endMin } or null when no time can be read. A single time is treated as a
+// start time and the event is assumed to last 3 hours.
+export function eventTimeRange(text) {
+  const str = String(text || '');
+  const re = /(\d{1,2})(?:[:.](\d{2}))?\s*(?:([ap])\.?\s?m\.?)?/gi;
+  const toks = [];
+  let m;
+  while ((m = re.exec(str))) {
+    const h = Number(m[1]);
+    const min = m[2] ? Number(m[2]) : 0;
+    const mer = m[3] ? m[3].toLowerCase() : '';
+    if (min > 59 || h > 24 || (mer && (h < 1 || h > 12))) continue;
+    toks.push({ h, min, mer, explicit: !!(m[2] || mer) });
+  }
+  // bare numbers ("Hall 3") only count when the text also has a real clock time in it
+  if (!toks.some((t) => t.explicit)) return null;
+  const to24 = (t, mer) => (t.h % 12) * 60 + t.min + (mer === 'p' ? 720 : 0);
+  // no am/pm anywhere: 24-hour if any hour is 13+, otherwise guess (7-11 morning, 12 and 1-6 afternoon)
+  const guess = (t) => (t.h === 12 ? 12 * 60 + t.min : t.h >= 7 ? t.h * 60 + t.min : (t.h + 12) * 60 + t.min);
+  const first = toks[0];
+  if (toks.length === 1) {
+    const startMin = first.mer ? to24(first, first.mer) : first.h >= 13 ? first.h * 60 + first.min : guess(first);
+    return { startMin, endMin: startMin + 180 };
+  }
+  const last = toks[toks.length - 1];
+  let startMin, endMin;
+  if (last.mer) {
+    endMin = to24(last, last.mer);
+    startMin = to24(first, first.mer || last.mer);
+    if (!first.mer && startMin > endMin) startMin -= 720;       // "11:00-1:00pm" starts at 11am
+    else if (first.mer && startMin > endMin) endMin += 1440;    // "11:00pm-1:00am" ends after midnight
+  } else if (first.mer) {
+    startMin = to24(first, first.mer);
+    endMin = to24(last, first.mer);
+    if (endMin <= startMin) endMin += 720;                      // "10:30am - 12:00" ends at noon
+  } else if (toks.some((t) => t.h >= 13)) {
+    startMin = first.h * 60 + first.min;
+    endMin = last.h * 60 + last.min;
+  } else {
+    startMin = guess(first);
+    endMin = guess(last);
+    if (endMin <= startMin) endMin += 720;
+  }
+  return { startMin, endMin };
+}
+
+const localDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const minutesNow = (d) => d.getHours() * 60 + d.getMinutes();
+
+// True once an event is over: its date has passed, or it is today and its end time has passed.
+// Events with no readable time stay "upcoming" until the end of their day.
+export function eventHasEnded(e, now = new Date()) {
+  const day = String(e.date || '').slice(0, 10);
+  const todayStr = localDate(now);
+  if (day < todayStr) return true;
+  if (day > todayStr) return false;
+  const range = eventTimeRange(e.event_time);
+  return !!range && minutesNow(now) >= range.endMin;
+}
+
+export function eventInProgress(e, now = new Date()) {
+  if (String(e.date || '').slice(0, 10) !== localDate(now)) return false;
+  const range = eventTimeRange(e.event_time);
+  const n = minutesNow(now);
+  return !!range && n >= range.startMin && n < range.endMin;
+}
+
+// Events that have not finished yet, soonest first (same day: by start time).
+export function upcomingEvents(events, now = new Date()) {
+  const start = (e) => { const r = eventTimeRange(e.event_time); return r ? r.startMin : 9999; };
+  return [...(events || [])]
+    .filter((e) => !eventHasEnded(e, now))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || start(a) - start(b));
+}
+
 const HIDDEN = ['id', 'created_by', 'updated_at'];
 
 export function toCSV(rows) {

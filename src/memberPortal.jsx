@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from './auth';
 import { useData } from './data';
 import { supabase } from './supabase';
+import { upcomingEvents } from './utils';
 
 const money = (n) => `GH₵ ${Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const dateText = (v) => v ? new Date(v).toLocaleDateString() : '';
@@ -56,7 +57,7 @@ export default function MemberPortal() {
     const daysPresent = presentDates.size;
     return { daysPresent, attendanceDays, percent: attendanceDays ? Math.round(daysPresent / attendanceDays * 100) : 0 };
   }, [data.attendance, member]);
-  const events = [...data.events].filter(e=>e.date>=new Date().toISOString().slice(0,10)).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const events = upcomingEvents(data.events);
   const announcements = [...(data.announcements||[])].filter(a=>a.active !== false && (!a.publish_from || a.publish_from<=new Date().toISOString().slice(0,10)) && (!a.publish_until || a.publish_until>=new Date().toISOString().slice(0,10))).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,8);
 
   async function saveProfile(e){
