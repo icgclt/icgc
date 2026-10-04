@@ -51,6 +51,17 @@ function GroupBreakdown({ rows }) {
   );
 }
 
+// "Title (n): name, name, ..." line used under the dashboard tables so people can be found and fixed.
+function NameList({ title, names, hint }) {
+  if (!names.length) return null;
+  return (
+    <div className="muted sm" style={{ marginTop: 10 }}>
+      <b>{title} ({names.length}):</b> {names.slice(0, 40).join(', ')}{names.length > 40 ? ` and ${names.length - 40} more` : ''}.
+      {hint && <><br />{hint}</>}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const { data } = useData();
   const { profile } = useAuth();
@@ -64,6 +75,9 @@ export function Dashboard() {
     const male = countOf(type, 'Male'), female = countOf(type, 'Female'), none = countOf(type, null);
     return { label, male, female, none, total: male + female + none };
   });
+  const noGender = (m) => m.gender !== 'Male' && m.gender !== 'Female';
+  const labelOf = (m) => `${m.name}${m.member_code ? ` (${m.member_code})` : ''}`;
+  const noGenderMembers = pool.filter(noGender).sort(memberIdCompare).map(labelOf);
   const lastDate = data.attendance.map((a) => a.date).sort().pop();
   const presentRows = data.attendance.filter((a) => a.date === lastDate && a.status === 'Present');
   const lastPresent = presentRows.length;
@@ -80,14 +94,18 @@ export function Dashboard() {
   const presentBreakdown = GROUPS.map(([type, label]) => ({ label, type, male: 0, female: 0, none: 0, total: 0 }));
   const notLinked = { label: 'Not linked to a member', male: 0, female: 0, none: 0, total: 0 };
   const notLinkedNames = [];
+  const noGenderPresent = new Map();
   presentRows.forEach((a) => {
     const m = byId.get(a.member_id) || byId.get(childMember.get(a.child_id)) || byName.get(nameKey(a.person_name)) || matchLoose(a.person_name);
     const row = m ? presentBreakdown.find((r) => r.type === (m.member_type || 'Adult')) || notLinked : notLinked;
     const key = m && m.gender === 'Male' ? 'male' : m && m.gender === 'Female' ? 'female' : 'none';
     row[key] += 1; row.total += 1;
     if (!m) notLinkedNames.push(String(a.person_name || '(no name)').trim());
+    else if (key === 'none') noGenderPresent.set(m.id, m);
   });
   const presentTable = notLinked.total ? [...presentBreakdown, notLinked] : presentBreakdown;
+  const noGenderPresentNames = [...noGenderPresent.values()].sort(memberIdCompare).map(labelOf);
+  const genderHint = 'Open Members, find the person, edit and choose Male or Female.';
   const upcoming = data.events.filter((e) => e.date >= today()).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
   const recent = [...data.members].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 5);
 
@@ -111,18 +129,15 @@ export function Dashboard() {
           <div className="num">{pool.length}</div>
           <div className="muted sm">{active} active · {data.members.length} on the register (all statuses)</div>
           <GroupBreakdown rows={breakdown} />
+          <NameList title="Gender not set" names={noGenderMembers} hint={genderHint} />
         </div>
         <div className="card" style={{ gridColumn: 'span 2' }}>
           <div className="label">Last attendance{lastDate ? ` (${lastDate})` : ''}</div>
           <div className="num">{lastPresent}</div>
           <div className="muted sm">present</div>
           <GroupBreakdown rows={presentTable} />
-          {notLinkedNames.length > 0 && (
-            <div className="muted sm" style={{ marginTop: 10 }}>
-              <b>Not linked ({notLinkedNames.length}):</b> {notLinkedNames.slice(0, 40).join(', ')}{notLinkedNames.length > 40 ? ` and ${notLinkedNames.length - 40} more` : ''}.
-              <br />No member has this name. Correct the spelling in Attendance Records, or add the person under Members.
-            </div>
-          )}
+          <NameList title="Gender not set" names={noGenderPresentNames} hint={genderHint} />
+          <NameList title="Not linked" names={notLinkedNames} hint="No member has this name. Correct the spelling in Attendance Records, or add the person under Members." />
         </div>
         <div className="card"><div className="label">New visitors</div><div className="num">{data.visitors.filter(v => v.visit_date === today()).length}</div><div className="muted sm">today</div></div>
         <div className="card"><div className="label">Open follow-ups</div><div className="num">{data.follow_ups.filter(f => f.status === 'Open' || f.status === 'In Progress').length}</div></div>
