@@ -8,7 +8,10 @@ export function uuid() {
 }
 
 export const money = (n) =>
-  new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(Number(n) || 0);
+  `GH\u20B5 ${new Intl.NumberFormat('en-GH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number(n) || 0)}`;
 
 export function today() {
   const d = new Date();
@@ -143,4 +146,24 @@ export function parseCSV(text) {
     .slice(1)
     .filter((r) => r.some((c) => c.trim() !== ''))
     .map((r) => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? '').trim()])));
+}
+
+/** Escape text for safe HTML insertion (e.g. print/ID card templates). */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Show phone for member portal logins instead of member-233...@members.icgctt.local */
+export function formatLoginId(value) {
+  const s = String(value || '');
+  const m = s.match(/^member-233(\d{9})@members\.icgctt\.local$/i);
+  if (m) return `0${m[1]}`;
+  const m2 = s.match(/^member-(\d+)@members\.icgctt\.local$/i);
+  if (m2) return m2[1];
+  return s;
 }

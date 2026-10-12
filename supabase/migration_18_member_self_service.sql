@@ -66,7 +66,7 @@ declare
   v_member_id uuid;
   v_row public.members;
 begin
-  select member_id into v_member_id from public.profiles where id = auth.uid();
+  v_member_id := (select p.member_id from public.profiles p where p.id = auth.uid());
   if v_member_id is null then
     raise exception 'Your account is not linked to a member record.';
   end if;
@@ -78,9 +78,9 @@ begin
       marital_status = nullif(trim(p_marital_status), ''),
       occupation = nullif(trim(p_occupation), ''),
       emergency_contact = nullif(trim(p_emergency_contact), '')
-  where id = v_member_id
-  returning * into v_row;
+  where id = v_member_id;
 
+  v_row := (select m from public.members m where m.id = v_member_id);
   return v_row;
 end;
 $$;

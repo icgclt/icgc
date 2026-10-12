@@ -19,7 +19,7 @@ export function memberLoginEmail(value) {
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
 
-export const ROLES = ['super_admin', 'admin', 'finance', 'secretary', 'viewer', 'member', 'sunday_school_teacher', 'pending'];
+export const ROLES = ['super_admin', 'admin', 'finance', 'finance_reviewer', 'pastor', 'secretary', 'viewer', 'member', 'sunday_school_teacher', 'pending'];
 export const effectiveRole = (role) => role === 'super_admin' ? 'admin' : role;
 export const isSuperAdmin = (role) => role === 'super_admin';
 export const isAdmin = (role) => role === 'admin' || role === 'super_admin';
@@ -36,10 +36,10 @@ export const PERMS = {
   welfare_transactions:   { read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
   visitors:               { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   groups:                 { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
-  follow_ups:             { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
-  prayer_requests:        { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
+  follow_ups:             { read: ['admin','finance','secretary','viewer','pastor'], write: ['admin','secretary','pastor'], del: ['admin'] },
+  prayer_requests:        { read: ['admin','finance','secretary','viewer','pastor'], write: ['admin','secretary','pastor'], del: ['admin'] },
   service_plans:          { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
-  pastoral_cases:        { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
+  pastoral_cases:        { read: ['admin','secretary','pastor'], write: ['admin','secretary','pastor'], del: ['admin'] },
   families:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   children:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   child_checkins:         { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
@@ -52,12 +52,13 @@ export const PERMS = {
   communication_templates: { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
   communication_queue:   { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
   finance_reconciliations:{ read: ['admin','finance'], write: ['admin','finance'], del: ['admin'] },
-  finance_weekly_reports:  { read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
-  finance_weekly_cash_counts:{ read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
-  finance_weekly_momo:    { read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
-  finance_weekday_collections: { read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
-  finance_weekday_cash_counts: { read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
-  finance_weekday_momo: { read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
+  finance_weekly_reports:  { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
+  finance_weekly_cash_counts:{ read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
+  finance_weekly_momo:    { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
+  finance_weekday_collections: { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
+  finance_weekday_cash_counts: { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
+  finance_weekday_momo: { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
+  announcements:           { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
 };
 export const can = (role, table, action) => PERMS[table]?.[action]?.includes(effectiveRole(role)) || false;
 

@@ -60,7 +60,7 @@ create table public.members (
   dob        date,
   gender     text check (gender in ('Male','Female')),
   grp        text,                       -- group / cell
-  status     text not null default 'Active' check (status in ('Active','Inactive','Visitor')),
+  status     text not null default 'Active' check (status in ('Active','Inactive','Visitor','Left')),
   address    text,
   notes      text,
   created_at timestamptz not null default now(),

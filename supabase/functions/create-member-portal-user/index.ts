@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser()
     if (!user) throw new Error('You must be signed in.')
     const { data: caller } = await userClient.from('profiles').select('role').eq('id', user.id).maybeSingle()
-    if (!caller || !['admin', 'secretary'].includes(caller.role)) throw new Error('Only administrators and secretaries can create member portal accounts.')
+    if (!caller || !['super_admin', 'admin', 'secretary'].includes(caller.role)) throw new Error('Only Super Admin, administrators and secretaries can create member portal accounts.')
 
     const { member_id } = await req.json()
     if (!member_id) throw new Error('member_id is required.')
@@ -49,13 +49,15 @@ Deno.serve(async (req) => {
     const temporary_password = generatePassword()
     const login_email = memberLoginEmail(phone)
     if (!login_email) throw new Error('Could not create a valid member login identifier from this phone number.')
-    const user_metadata = { full_name: member.name, member_id: member.id, must_change_password: true, member_phone: phone }
+    const user_metadata = { full_name: member.name, member_id: member.id, member_phone: phone }
+    // app_metadata can only be changed with the service-role key, so members cannot clear this themselves.
+    const app_metadata = { must_change_password: true }
     let authUserId = member.user_id || null
     if (authUserId) {
-      const { error } = await admin.auth.admin.updateUserById(authUserId, { email: login_email, email_confirm: true, password: temporary_password, user_metadata })
+      const { error } = await admin.auth.admin.updateUserById(authUserId, { email: login_email, email_confirm: true, password: temporary_password, user_metadata, app_metadata })
       if (error) throw error
     } else {
-      const { data: created, error } = await admin.auth.admin.createUser({ email: login_email, email_confirm: true, password: temporary_password, user_metadata })
+      const { data: created, error } = await admin.auth.admin.createUser({ email: login_email, email_confirm: true, password: temporary_password, user_metadata, app_metadata })
       if (error) throw error
       authUserId = created.user.id
     }

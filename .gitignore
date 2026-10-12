@@ -1,4 +1,16 @@
+# dependencies and build output
 node_modules
 dist
+
+# local secrets - never commit these
 .env
-.env.local
+.env.*
+!.env.example
+
+# hosting / OS / editor
+.vercel
+.DS_Store
+Thumbs.db
+*.log
+.vscode
+.idea

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from './auth';
 import { useData } from './data';
 import { supabase } from './supabase';
-import { upcomingEvents } from './utils';
+import { upcomingEvents, formatLoginId } from './utils';
 
 const money = (n) => `GH₵ ${Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const dateText = (v) => v ? new Date(v).toLocaleDateString() : '';
@@ -17,7 +17,7 @@ function printReceipt(r) {
 export default function MemberPortal() {
   const { user, profile } = useAuth();
   const { data, syncNow } = useData();
-  const member = useMemo(() => data.members.find(m => m.user_id === user?.id || (profile?.member_id && m.id === profile.member_id)), [data.members,user?.id,profile?.member_id]);
+  const member = useMemo(() => (data.members||[]).find(m => m.user_id === user?.id || (profile?.member_id && m.id === profile.member_id)), [data.members,user?.id,profile?.member_id]);
   const [tab,setTab]=useState('home');
   const [payAmount,setPayAmount]=useState(''); const [payFund,setPayFund]=useState('Offering'); const [payPhone,setPayPhone]=useState(''); const [payProvider,setPayProvider]=useState('mtn'); const [payMsg,setPayMsg]=useState('');
   const [request,setRequest]=useState(''); const [msg,setMsg]=useState(''); const [saving,setSaving]=useState(false); const [profileMsg,setProfileMsg]=useState('');
@@ -36,8 +36,8 @@ export default function MemberPortal() {
     if(p) setPrefs({...prefs,...p});
   },[data.member_notification_preferences,member?.id]);
 
-  const myAttendance = useMemo(() => member ? data.attendance.filter(a => a.member_id === member.id || a.person_name === member.name).sort((a,b)=>String(b.date).localeCompare(String(a.date))) : [], [data.attendance,member]);
-  const myGiving = useMemo(() => member ? data.giving.filter(g => g.member_id === member.id).sort((a,b)=>String(b.date).localeCompare(String(a.date))) : [], [data.giving,member]);
+  const myAttendance = useMemo(() => member ? (data.attendance||[]).filter(a => a.member_id === member.id || a.person_name === member.name).sort((a,b)=>String(b.date).localeCompare(String(a.date))) : [], [data.attendance,member]);
+  const myGiving = useMemo(() => member ? (data.giving||[]).filter(g => g.member_id === member.id).sort((a,b)=>String(b.date).localeCompare(String(a.date))) : [], [data.giving,member]);
   const myReceipts = useMemo(() => member ? (data.payment_receipts||[]).filter(r=>r.member_id===member.id && r.status==='Paid').sort((a,b)=>String(b.paid_at||b.created_at).localeCompare(String(a.paid_at||a.created_at))) : [], [data.payment_receipts,member]);
   const myRequests = useMemo(() => member ? (data.payment_requests||[]).filter(r=>r.member_id===member.id).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))) : [], [data.payment_requests,member]);
   const myPrayers = useMemo(() => member ? (data.prayer_requests||[]).filter(r=>r.member_id===member.id).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))) : [], [data.prayer_requests,member]);
@@ -57,8 +57,16 @@ export default function MemberPortal() {
     const daysPresent = presentDates.size;
     return { daysPresent, attendanceDays, percent: attendanceDays ? Math.round(daysPresent / attendanceDays * 100) : 0 };
   }, [data.attendance, member]);
-  const events = upcomingEvents(data.events);
-  const announcements = [...(data.announcements||[])].filter(a=>a.active !== false && (!a.publish_from || a.publish_from<=new Date().toISOString().slice(0,10)) && (!a.publish_until || a.publish_until>=new Date().toISOString().slice(0,10))).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,8);
+  const events = upcomingEvents(data.events||[]);
+  const todayIso = new Date().toISOString().slice(0,10);
+  const announcements = [...(data.announcements||[])].filter(a=>{
+    if (a.active === false || a.active === 'false') return false;
+    const from = a.publish_from ? String(a.publish_from).slice(0,10) : '';
+    const until = a.publish_until ? String(a.publish_until).slice(0,10) : '';
+    if (from && from > todayIso) return false;
+    if (until && until < todayIso) return false;
+    return true;
+  }).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,8);
 
   async function saveProfile(e){
     e.preventDefault(); setSaving(true); setProfileMsg('');
@@ -78,14 +86,26 @@ export default function MemberPortal() {
   }
   async function submitPrayer(e){
     e.preventDefault(); if(!request.trim()) return;
-    const {error}=await supabase.from('prayer_requests').insert({id:crypto.randomUUID(),person_name:member?.name || profile?.full_name || user.email,member_id:member?.id || null,category:'Member request',request:request.trim(),priority:'Normal',status:'Open',private_notes:''});
+    const requester = member?.name || profile?.full_name || user?.email || 'Member';
+    const {error}=await supabase.from('prayer_requests').insert({
+      id: crypto.randomUUID(),
+      date: new Date().toISOString().slice(0,10),
+      requester,
+      phone: member?.phone || '',
+      member_id: member?.id || profile?.member_id || null,
+      category: 'General',
+      request: request.trim(),
+      status: 'New',
+      confidential: false,
+      notes: '',
+    });
     if(error){setMsg(error.message);return;} setRequest(''); setMsg('Prayer request submitted.'); await syncNow();
   }
 
   const setField=(k,v)=>setForm(x=>({...x,[k]:v}));
   const setPref=(k,v)=>setPrefs(x=>({...x,[k]:v}));
   return <div>
-    <div className="top"><div><h1>My Church</h1><p className="muted">Welcome, {member?.name || profile?.full_name || user.email}.</p></div></div>
+    <div className="top"><div><h1>My Church</h1><p className="muted">Welcome, {member?.name || profile?.full_name || formatLoginId(user?.email)}.</p></div></div>
     {!member && <div className="panel"><h2>Profile linking needed</h2><p className="muted">Your login is not linked to a member record yet. Ask a church administrator to connect your account to your member profile.</p></div>}
     <div className="tabs">{['home','profile','attendance','giving','receipts','pay','events','prayer','notifications'].map(x=><button key={x} className={tab===x?'tab active':'tab'} onClick={()=>setTab(x)}>{x[0].toUpperCase()+x.slice(1)}</button>)}</div>
     {tab==='home' && <>
@@ -93,7 +113,7 @@ export default function MemberPortal() {
       <div className="panel"><h2>Upcoming church events</h2>{events.length ? events.slice(0,5).map(e=><div className="listrow" key={e.id}><b>{e.title}</b><div>{e.date}{e.event_time ? ` · ${e.event_time}` : ''}{e.location ? ` · ${e.location}` : ''}</div></div>) : <p className="muted">No upcoming events.</p>}</div><div className="panel"><h2>Quick actions</h2><div className="toolbar"><button className="primary" onClick={()=>setTab('profile')}>Update my profile</button><button className="secondary" onClick={()=>setTab('pay')}>Give by Mobile Money</button><button className="secondary" onClick={()=>setTab('events')}>View upcoming events</button><button className="secondary" onClick={()=>setTab('prayer')}>Send prayer request</button></div></div>
       <div className="panel"><h2>Church announcements</h2>{announcements.length?announcements.map(a=><div className="listrow" key={a.id}><b>{a.title}</b><div className="muted">{a.body}</div></div>):<p className="muted">No announcements.</p>}</div>
     </>}
-    {tab==='profile' && <div className="panel"><h2>My profile</h2><p className="muted">Church-controlled information is shown below. You can update your contact and personal details.</p><div className="grid2"><p><b>Name</b><br/>{member?.name||profile?.full_name}</p><p><b>Member ID</b><br/>{member?.member_code||'Pending'}</p><p><b>Gender</b><br/>{member?.gender||'Not recorded'}</p><p><b>Date of birth</b><br/>{member?.dob||'Not recorded'}</p><p><b>Status</b><br/>{member?.status||'Not linked'}</p><p><b>Group</b><br/>{member?.grp||'Not assigned'}</p></div><form onSubmit={saveProfile}><div className="formgrid"><div><label>Phone</label><input value={form.phone} onChange={e=>setField('phone',e.target.value)}/></div><div><label>Email</label><input type="email" value={form.email} onChange={e=>setField('email',e.target.value)}/></div><div><label>Address</label><input value={form.address} onChange={e=>setField('address',e.target.value)}/></div><div><label>Marital status</label><select value={form.marital_status} onChange={e=>setField('marital_status',e.target.value)}><option value="">Not specified</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></div><div><label>Occupation</label><input value={form.occupation} onChange={e=>setField('occupation',e.target.value)}/></div><div><label>Emergency contact</label><input value={form.emergency_contact} onChange={e=>setField('emergency_contact',e.target.value)}/></div></div><button className="primary" disabled={saving} style={{marginTop:12}}>{saving?'Saving…':'Save my profile'}</button></form>{profileMsg&&<p className="muted">{profileMsg}</p>}</div>}
+    {tab==='profile' && <div className="panel"><h2>My profile</h2><p className="muted">Church-controlled information is shown below. You can update your contact and personal details.</p><div className="grid2"><p><b>Name</b><br/>{member?.name||profile?.full_name}</p><p><b>Member ID</b><br/>{member?.member_code||'Pending'}</p><p><b>Gender</b><br/>{member?.gender||'Not recorded'}</p><p><b>Date of birth</b><br/>{member?.dob||'Not recorded'}</p><p><b>Status</b><br/>{member?.status||'Not linked'}</p><p><b>Group</b><br/>{member?.grp||'Not assigned'}</p></div><form onSubmit={saveProfile}><div className="formgrid"><div><label>Phone</label><input value={form.phone} readOnly title="Phone numbers are updated by the church office"/></div><div><label>Email</label><input type="email" value={form.email} onChange={e=>setField('email',e.target.value)}/></div><div><label>Address</label><input value={form.address} onChange={e=>setField('address',e.target.value)}/></div><div><label>Marital status</label><select value={form.marital_status} onChange={e=>setField('marital_status',e.target.value)}><option value="">Not specified</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></div><div><label>Occupation</label><input value={form.occupation} onChange={e=>setField('occupation',e.target.value)}/></div><div><label>Emergency contact</label><input value={form.emergency_contact} onChange={e=>setField('emergency_contact',e.target.value)}/></div></div><button className="primary" disabled={saving} style={{marginTop:12}}>{saving?'Saving…':'Save my profile'}</button></form>{profileMsg&&<p className="muted">{profileMsg}</p>}</div>}
     {tab==='attendance' && <div><div className="panel"><h2>My attendance</h2><div className="cards"><div className="card"><div className="muted">Attendance percentage</div><strong>{attendanceSummary.percent}%</strong><div className="muted sm">{attendanceSummary.daysPresent} present days out of {attendanceSummary.attendanceDays} recorded attendance days</div></div></div><div className="tablewrap"><table><thead><tr><th>Date</th><th>Service</th><th>Status</th></tr></thead><tbody>{myAttendance.map(a=><tr key={a.id}><td>{a.date}</td><td>{a.service}</td><td>{a.status}</td></tr>)}{!myAttendance.length&&<tr><td colSpan="3" className="empty">No attendance records yet.</td></tr>}</tbody></table></div></div></div>}
     {tab==='giving' && <div className="panel"><h2>My giving</h2><p><b>Total recorded giving: {money(totalGiving)}</b></p><div className="tablewrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Reference</th></tr></thead><tbody>{myGiving.map(g=><tr key={g.id}><td>{g.date}</td><td>{g.type}</td><td>{money(g.amount)}</td><td>{g.reference||''}</td></tr>)}{!myGiving.length&&<tr><td colSpan="4" className="empty">No giving records linked to your profile.</td></tr>}</tbody></table></div></div>}
     {tab==='receipts' && <div className="panel"><h2>My digital receipts</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Receipt</th><th>Fund</th><th>Amount</th><th>Method</th><th></th></tr></thead><tbody>{myReceipts.map(r=><tr key={r.id}><td>{dateText(r.paid_at||r.created_at)}</td><td>{r.receipt_number||'—'}</td><td>{r.fund}</td><td>{money(r.amount)}</td><td>{r.method||''}</td><td><button className="secondary" onClick={()=>printReceipt(r)}>Print</button></td></tr>)}{!myReceipts.length&&<tr><td colSpan="6" className="empty">No paid receipts available yet.</td></tr>}</tbody></table></div></div>}

@@ -134,3 +134,10 @@ The first login is marked `must_change_password=true`, and the portal forces the
 - Import success is reported only after Supabase confirms every imported member.
 - The app then refreshes from the confirmed database state, preventing imported members from disappearing during the next sync.
 - Duplicate member IDs are rejected instead of silently overwriting another member.
+
+
+## Member passport photos (v34)
+
+Run `supabase/migration_34_member_photos.sql` once in the Supabase SQL Editor. It creates a **private** `member-photos` Storage bucket with a 5 MB source-file limit. The browser automatically center-crops uploaded images to a passport-style 3:4 ratio and compresses them to approximately 300x400 JPEG before upload. PostgreSQL stores only the Storage object path in `members.photo_url`.
+
+For Supabase Free, this avoids putting image bytes in the database and lazy-loads member thumbnails. CSV exports intentionally do not embed photos; photos remain attached to the member record in Storage.

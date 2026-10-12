@@ -5,7 +5,7 @@
 const VERSION = 'cm-shell-v1';
 const SHELL = ['./index.html', './manifest.json', './icon-192.png', './icon-512.png', './icgc-logo.png'];
 const MAX_ENTRIES = 80;       // hashed build files pile up across deploys; trim the oldest
-const NAV_TIMEOUT_MS = 4000;  // on a weak connection, fall back to the saved shell instead of hanging
+const NAV_TIMEOUT_MS = 1500;  // on a weak connection, fall back to the saved shell instead of hanging
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -29,21 +29,33 @@ async function trim(cache) {
   for (let i = 0; i < extra; i++) await cache.delete(keys[i]);
 }
 
+
 async function handleNavigation(request) {
   const cache = await caches.open(VERSION);
+  const cached = await cache.match('./index.html');
+
+  // If the browser knows it is offline, show the saved app immediately.
+  if (!self.navigator.onLine && cached) {
+    return cached;
+  }
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), NAV_TIMEOUT_MS);
+
   try {
     const res = await fetch(request, { signal: ctrl.signal });
     clearTimeout(timer);
-    if (res.ok) cache.put('./index.html', res.clone());
+
+    if (res.ok) {
+      cache.put('./index.html', res.clone()).catch(() => {});
+    }
+
     return res;
   } catch {
     clearTimeout(timer);
-    return (await cache.match('./index.html')) || Response.error();
+    return cached || Response.error();
   }
 }
-
 async function handleAsset(request) {
   const cache = await caches.open(VERSION);
   const cached = await cache.match(request);

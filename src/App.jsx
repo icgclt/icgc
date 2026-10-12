@@ -5,9 +5,10 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, AbsenteeList, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
   FirstFruit, Departments, Events, Users, Settings, SendSMS,
-  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup, FinanceCenter, AutomationCenter,
+  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup, FinanceCenter, Expenditure, Cashbook, AutomationCenter,
 } from './pages';
 import { DepartmentDashboard } from './operational';
+import { formatLoginId } from './utils';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
 
@@ -143,7 +144,7 @@ function Pending() {
     <div className="login">
       <div className="loginbox">
         <h1>Waiting for approval</h1>
-        <p>{profile ? <>Your account (<b>{user.email}</b>) has been created, but an administrator has not given it access yet.</> : <>Your account exists but has no profile yet. Ask the administrator to check the database setup.</>}</p>
+        <p>{profile ? <>Your account (<b>{formatLoginId(user.email)}</b>) has been created, but an administrator has not given it access yet.</> : <>Your account exists but has no profile yet. Ask the administrator to check the database setup.</>}</p>
         <button className="primary" onClick={refreshProfile}>Check again</button>
         <div style={{ height: 10 }} />
         <button className="secondary" onClick={signOut}>Sign out</button>
@@ -186,6 +187,8 @@ const NAV = [
   ] },
   { group: 'finance', label: '💰 Finance', items: [
     ['financecenter', 'Finance Center', FinanceCenter, 'finance.view'],
+    ['expenditure', 'Expenditure', Expenditure, 'finance.view'],
+    ['cashbook', 'Cashbook', Cashbook, 'finance.view'],
     ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'finance_reconciliation.view'],
   ] },
   { group: 'welfare', label: '🤝 Welfare', items: [
@@ -260,6 +263,7 @@ const CURRENT_PERMISSION_CATALOG = [
   ['notifications.manage','notifications','manage','Manage Notifications','Manage church notifications'],
   ['finance.view','finance','view','View Finance','Access Finance Center and financial records'],
   ['finance.manage','finance','manage','Manage Finance','Create, edit and manage Finance Center records'],
+  ['finance_reviewer.approve','finance_reviewer','approve','Review & Approve Financial Records','Review submitted reports and expenditure; approve, return or reject records. This does not authorize reopening locked records.'],
   ['finance_reconciliation.view','finance_reconciliation','view','View Reconciliation','Access financial reconciliation'],
   ['finance_reconciliation.manage','finance_reconciliation','manage','Manage Reconciliation','Perform financial checking and reconciliation'],
   ['welfare.view','welfare','view','View Welfare','Access Welfare Dues and Welfare Fund'],
@@ -330,8 +334,8 @@ function PermissionManager() {
 
   useEffect(() => { if (role === 'super_admin' && hasPermission('permissions.view')) load(); }, [role, selectedRole]);
 
-  const MODULE_ORDER = ['dashboard','members','attendance','children','child_checkins','groups','departments','events','visitors','follow_ups','prayer_requests','pastoral_care','notifications','finance','finance_reconciliation','welfare','service_plans','advanced_reports','audit','users','permissions','settings','backup','clear_test_data'];
-  const LABELS = { dashboard:'Dashboard',members:'Members',attendance:'Attendance',children:'Children','child_checkins':'Children Check-in / Pickup',groups:'Groups',departments:'Departments',events:'Events',visitors:'Visitors',follow_ups:'Follow-ups',prayer_requests:'Prayer Requests',pastoral_care:'Pastoral Care',notifications:'Notifications',finance:'Finance',finance_reconciliation:'Finance Reconciliation',welfare:'Welfare',service_plans:'Service Plans',advanced_reports:'Advanced Reports',audit:'Audit Log',users:'User Management',permissions:'Permissions',settings:'System Settings',backup:'Backup',clear_test_data:'Clear Test Data' };
+  const MODULE_ORDER = ['dashboard','members','attendance','children','child_checkins','groups','departments','events','visitors','follow_ups','prayer_requests','pastoral_care','notifications','finance','finance_reviewer','finance_reconciliation','welfare','service_plans','advanced_reports','audit','users','permissions','settings','backup','clear_test_data'];
+  const LABELS = { dashboard:'Dashboard',members:'Members',attendance:'Attendance',children:'Children','child_checkins':'Children Check-in / Pickup',groups:'Groups',departments:'Departments',events:'Events',visitors:'Visitors',follow_ups:'Follow-ups',prayer_requests:'Prayer Requests',pastoral_care:'Pastoral Care',notifications:'Notifications',finance:'Finance',finance_reviewer:'Finance Reviewer',finance_reconciliation:'Finance Reconciliation',welfare:'Welfare',service_plans:'Service Plans',advanced_reports:'Advanced Reports',audit:'Audit Log',users:'User Management',permissions:'Permissions',settings:'System Settings',backup:'Backup',clear_test_data:'Clear Test Data' };
   const grouped = useMemo(() => {
     const out = {}; permissions.forEach(p => { if (!out[p.module]) out[p.module]=[]; out[p.module].push(p); });
     return Object.fromEntries(MODULE_ORDER.filter(m=>out[m]?.length).map(m=>[m,out[m]]));
@@ -361,7 +365,7 @@ function PermissionManager() {
     const label = newRoleName.trim();
     if (!label) return setError('Enter a role name.');
     const key = label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-    if (!key || ['super_admin','admin','finance','secretary','viewer','member','pending'].includes(key)) return setError('Choose a different role name.');
+    if (!key || ['super_admin','admin','finance','finance_reviewer','secretary','viewer','member','pending'].includes(key)) return setError('Choose a different role name.');
     setCreatingRole(true); setError(''); setMsg('');
     try {
       const { error } = await supabase.from('role_catalog').insert({role_key:key,label,base_role:newRoleBase,is_system:false});
@@ -402,12 +406,13 @@ function PermissionManager() {
 function Shell() {
   const { role, signOut, hasPermission } = useAuth();
   const { pending, wipe } = useData();
-  const [page, setPage] = useState('dashboard');
+  // Members only have My Church — never start them on the staff dashboard (it crashes without staff tables).
+  const [page, setPage] = useState(role === 'member' ? 'memberportal' : 'dashboard');
   const [open, setOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState({});
 
   const allowed = ([id, , , need]) => {
-    if (role === 'member') return id === 'memberportal' || id === 'settings';
+    if (role === 'member') return id === 'memberportal';
     if (!need) return true;
     return hasPermission(need);
   };
@@ -417,12 +422,24 @@ function Shell() {
     .filter((n) => (Array.isArray(n) ? allowed(n) : n.items.length > 0));
 
   const flat = menu.flatMap((n) => (Array.isArray(n) ? [n] : n.items));
-  const fallback = flat.find(([id]) => id === 'dashboard') || flat[0];
-  const current = flat.find(([id]) => id === page) || fallback;
-  const Current = current?.[2] || Dashboard;
-  const currentId = current?.[0] || 'dashboard';
+  // Full catalog so Pastoral Dashboard quick-links still open the right page even if a menu item is filtered out.
+  const allFlat = NAV.flatMap((n) => (Array.isArray(n) ? [n] : n.items));
+  const fallback = flat.find(([id]) => id === (role === 'member' ? 'memberportal' : 'dashboard')) || flat[0] || allFlat[0];
+  // Prefer permitted menu items. Only fall back to the full catalog for staff quick-links (never for members).
+  const current = flat.find(([id]) => id === page)
+    || (role !== 'member' ? allFlat.find(([id]) => id === page) : null)
+    || fallback;
+  const Current = current?.[2] || (role === 'member' ? MemberPortal : Dashboard);
+  const currentId = current?.[0] || (role === 'member' ? 'memberportal' : 'dashboard');
 
-  const go = (id) => { setPage(id); setOpen(false); };
+  const go = (id) => {
+    if (role === 'member' && id !== 'memberportal') return;
+    setPage(id);
+    setOpen(false);
+    // Expand the nav group that contains this page
+    const group = NAV.find((n) => !Array.isArray(n) && n.items.some(([itemId]) => itemId === id));
+    if (group) setOpenGroups((o) => ({ ...o, [group.group]: true }));
+  };
   const toggle = (g) => setOpenGroups((o) => ({ ...o, [g]: !o[g] }));
 
   async function logout() {
@@ -466,8 +483,10 @@ function Shell() {
           </div>
           <button className="secondary" onClick={logout}>Sign out</button>
         </div>
-        <Current />
+        <Current onNavigate={go} />
       </main>
     </div>
   );
 }
+
+

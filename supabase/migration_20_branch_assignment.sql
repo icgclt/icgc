@@ -1,7 +1,9 @@
 -- V20: Branch Assignment & Management
 -- Ensures all core records used by branch operations can safely carry a branch assignment.
+-- (attendance_headcount was missing its branch column here, which V21 needs; added.)
 
 do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='attendance_headcount' and column_name='branch_id') then alter table public.attendance_headcount add column branch_id uuid references public.branches(id); end if;
   if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='families' and column_name='branch_id') then alter table public.families add column branch_id uuid references public.branches(id); end if;
   if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='children' and column_name='branch_id') then alter table public.children add column branch_id uuid references public.branches(id); end if;
   if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='child_checkins' and column_name='branch_id') then alter table public.child_checkins add column branch_id uuid references public.branches(id); end if;
@@ -9,6 +11,7 @@ do $$ begin
   if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='payment_requests' and column_name='branch_id') then alter table public.payment_requests add column branch_id uuid references public.branches(id); end if;
 end $$;
 
+create index if not exists attendance_headcount_branch_id_idx on public.attendance_headcount(branch_id);
 create index if not exists families_branch_id_idx on public.families(branch_id);
 create index if not exists children_branch_id_idx on public.children(branch_id);
 create index if not exists child_checkins_branch_id_idx on public.child_checkins(branch_id);

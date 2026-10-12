@@ -3,7 +3,7 @@ import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
 import { useData, TABLES } from './data';
 import { supabase } from './supabase';
 import Crud, { StoragePhoto } from './Crud';
-import { money, today, downloadCSV, download, parseCSV, uuid, upcomingEvents as pickUpcomingEvents, eventInProgress } from './utils';
+import { money, today, downloadCSV, download, parseCSV, uuid, upcomingEvents as pickUpcomingEvents, eventInProgress, escapeHtml as esc, formatLoginId } from './utils';
 
 const STATUS = ['Active', 'Inactive', 'Visitor', 'Left'];
 const SERVICES = ['Sunday Service', 'Bible Study', 'Prayer Meeting', 'Special Program', 'Other'];
@@ -11,11 +11,12 @@ const OFFERING_CATEGORIES = ['Main Offering', 'Project Offering', "Children's Of
 const HEADCOUNT_CATEGORIES = ['Children Boys', 'Children Girls', 'Youth Boys', 'Youth Girls', 'Adult Men', 'Adult Women'];
 const headcountLabel = (cat) => cat.replace('Youth Boys', 'Omega Boys').replace('Youth Girls', 'Omega Girls');
 const badge = (v) => <span className="badge">{v}</span>;
+const displayMemberLogin = (value) => formatLoginId(value);
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const dayName = (iso) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long' }) : '';
-// Member IDs start with the church's letters: adults <P>A, Omega <P>O, children <P>C (e.g. TTA1 for Testimony Temple).
-// Set VITE_MEMBER_CODE_PREFIX to give another church its own letters. The default keeps the existing "TT".
+// Member IDs start with the church's letters: adults <P>A, Omega <P>O, children <P>C (e.g. TTA1 for ICGC Testimony Temple).
+// Set VITE_MEMBER_CODE_PREFIX in .env to override. Default is TT for Testimony Temple.
 const MEMBER_PREFIX = (import.meta.env.VITE_MEMBER_CODE_PREFIX || 'TT').toUpperCase();
 const [PFX_ADULT, PFX_OMEGA, PFX_CHILD] = [`${MEMBER_PREFIX}A`, `${MEMBER_PREFIX}O`, `${MEMBER_PREFIX}C`];
 const PFX_RE = new RegExp(`^(${PFX_ADULT}|${PFX_OMEGA}|${PFX_CHILD})`);
@@ -111,6 +112,7 @@ export function Dashboard() {
   useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(id); }, []);
   const upcoming = pickUpcomingEvents(data.events).slice(0, 5);
   const recent = [...data.members].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 5);
+  const birthdaySoon = (data.members || []).filter(m => m.dob && (() => { const now = new Date(); const birth = new Date(`${now.getFullYear()}-${String(m.dob).slice(5,7)}-${String(m.dob).slice(8,10)}T00:00:00`); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); let diff = Math.round((birth-start)/86400000); if (diff < 0) { birth.setFullYear(now.getFullYear()+1); diff = Math.round((birth-start)/86400000); } return diff >= 0 && diff <= 7; })()).map(m => { const now=new Date(); const mm=String(m.dob).slice(5,7), dd=String(m.dob).slice(8,10); let dt=new Date(`${now.getFullYear()}-${mm}-${dd}T00:00:00`); if(dt < new Date(now.getFullYear(),now.getMonth(),now.getDate())) dt.setFullYear(now.getFullYear()+1); return {...m, daysUntil:Math.round((dt-new Date(now.getFullYear(),now.getMonth(),now.getDate()))/86400000)}; }).sort((a,b)=>a.daysUntil-b.daysUntil);
 
   return (
     <>
@@ -145,6 +147,7 @@ export function Dashboard() {
         <div className="card"><div className="label">New visitors</div><div className="num">{data.visitors.filter(v => v.visit_date === today()).length}</div><div className="muted sm">today</div></div>
         <div className="card"><div className="label">Open follow-ups</div><div className="num">{data.follow_ups.filter(f => f.status === 'Open' || f.status === 'In Progress').length}</div></div>
       </div>
+      <div className="panel"><h2>Birthday reminders · next 7 days</h2>{birthdaySoon.length ? birthdaySoon.map(m=><div className="listrow" key={m.id}><b style={{marginRight:8}}>{m.name}</b><span>{m.daysUntil===0 ? 'Birthday today' : `In ${m.daysUntil} day${m.daysUntil===1?'':'s'}`} · {String(m.dob).slice(5)}</span></div>) : <p className="muted">No birthdays in the next 7 days.</p>}</div>
       <div className="grid2">
         <div className="panel">
           <h2>Recent members</h2>
@@ -790,7 +793,7 @@ export function Events() {
     values: {
       title: row?.title || '', date: row?.date || today(), event_time: row?.event_time || '',
       location: row?.location || '', description: row?.description || '',
-      recurrence: row?.recurrence || 'none', recurrence_end_date: row?.recurrence_end_date || ''
+      recurrence: row?.recurrence || 'none', recurrence_end_date: row?.recurrence_end_date || '', duration_days: row?.duration_days || 1
     }, errors: {}
   });
 
@@ -800,26 +803,27 @@ export function Events() {
     e.preventDefault();
     const v = form.values;
     if (!v.title.trim() || !v.date) return setForm({...form, errors:{title: !v.title.trim() ? 'Required' : undefined, date: !v.date ? 'Required' : undefined}});
+    if (v.recurrence === 'multi_day' && (!Number.isInteger(Number(v.duration_days)) || Number(v.duration_days) < 2 || Number(v.duration_days) > 60)) return setForm({...form, errors:{duration_days:'Choose between 2 and 60 days.'}});
     if (v.recurrence === 'weekly' && !v.recurrence_end_date) return setForm({...form, errors:{recurrence_end_date:'Select the last date for this weekly series.'}});
     if (v.recurrence === 'weekly' && v.recurrence_end_date < v.date) return setForm({...form, errors:{recurrence_end_date:'End date must be on or after the first event date.'}});
 
     if (form.original) {
-      save('events', {...form.original, title:v.title.trim(), date:v.date, event_time:v.event_time.trim(), location:v.location.trim(), description:v.description.trim(), recurrence:v.recurrence, recurrence_end_date:v.recurrence_end_date || null});
+      save('events', {...form.original, title:v.title.trim(), date:v.date, event_time:v.event_time.trim(), location:v.location.trim(), description:v.description.trim(), recurrence:v.recurrence, recurrence_end_date:v.recurrence_end_date || null, duration_days:Number(v.duration_days)||1});
     } else {
-      const seriesId = v.recurrence === 'weekly' ? uuid() : null;
+      const seriesId = ['weekly','multi_day'].includes(v.recurrence) ? uuid() : null;
       const dates = [];
       let d = new Date(v.date + 'T00:00:00');
-      const end = v.recurrence === 'weekly' ? new Date(v.recurrence_end_date + 'T00:00:00') : d;
+      const end = v.recurrence === 'weekly' ? new Date(v.recurrence_end_date + 'T00:00:00') : v.recurrence === 'multi_day' ? new Date(d.getTime() + (Number(v.duration_days)-1)*86400000) : d;
       for (let guard=0; d <= end && guard < 520; guard++) {
         dates.push(new Date(d));
-        if (v.recurrence !== 'weekly') break;
-        d.setDate(d.getDate()+7);
+        if (v.recurrence === 'none') break;
+        d.setDate(d.getDate()+(v.recurrence === 'weekly' ? 7 : 1));
       }
       dates.forEach(dt => {
         const iso = dt.toISOString().slice(0,10);
         save('events', {
           id: uuid(), title:v.title.trim(), date:iso, event_time:v.event_time.trim(), location:v.location.trim(), description:v.description.trim(),
-          recurrence:v.recurrence, recurrence_end_date:v.recurrence === 'weekly' ? v.recurrence_end_date : null,
+          recurrence:v.recurrence, recurrence_end_date:v.recurrence === 'weekly' ? v.recurrence_end_date : null, duration_days:Number(v.duration_days)||1,
           series_id:seriesId
         });
       });
@@ -828,10 +832,10 @@ export function Events() {
   };
 
   return <>
-    <div className="top"><div><h1>Events</h1><div className="muted">Create one-time events or recurring weekly events.</div></div>{canWrite && <button className="primary" onClick={()=>open()}>+ Add event</button>}</div>
+    <div className="top"><div><h1>Events</h1><div className="muted">Create one-time events, multi-day programmes, or recurring weekly events.</div></div>{canWrite && <button className="primary" onClick={()=>open()}>+ Add event</button>}</div>
     <div className="panel"><div className="toolbar"><input placeholder="Search events" value={q} onChange={e=>setQ(e.target.value)} /></div></div>
     <div className="panel"><div className="tablewrap"><table><thead><tr><th>Date</th><th>Event</th><th>Time</th><th>Location</th><th>Repeat</th><th></th></tr></thead><tbody>
-      {rows.map(e=><tr key={e.id}><td><b>{e.date}</b><br/><small>{dayName(e.date)}</small></td><td><b>{e.title}</b><br/><small>{e.description}</small></td><td>{e.event_time||''}</td><td>{e.location||''}</td><td>{e.recurrence==='weekly' ? `Weekly until ${e.recurrence_end_date}` : 'One-time'}</td><td>{canWrite&&<button onClick={()=>open(e)}>Edit</button>} {canDel&&<button className="danger" onClick={()=>remove('events',e.id)}>Delete</button>}</td></tr>)}
+      {rows.map(e=><tr key={e.id}><td><b>{e.date}</b><br/><small>{dayName(e.date)}</small></td><td><b>{e.title}</b><br/><small>{e.description}</small></td><td>{e.event_time||''}</td><td>{e.location||''}</td><td>{e.recurrence==='weekly' ? `Weekly until ${e.recurrence_end_date}` : e.recurrence==='multi_day' ? `Multi-day programme (${e.duration_days||1} days)` : 'One-time'}</td><td>{canWrite&&<button onClick={()=>open(e)}>Edit</button>} {canDel&&<button className="danger" onClick={()=>remove('events',e.id)}>Delete</button>}</td></tr>)}
       {!rows.length&&<tr><td colSpan="6" className="empty">No events.</td></tr>}
     </tbody></table></div></div>
     {form && <div className="modal"><form className="modalcard" onSubmit={submit}><h2>{form.original?'Edit event':'Add event'}</h2>
@@ -840,7 +844,8 @@ export function Events() {
         <div><label>First date *</label><input type="date" value={form.values.date} onChange={e=>set('date',e.target.value)} /></div>
         <div><label>Time</label><input value={form.values.event_time} onChange={e=>set('event_time',e.target.value)} placeholder="6:00 PM" /></div>
         <div><label>Location</label><input value={form.values.location} onChange={e=>set('location',e.target.value)} /></div>
-        <div><label>Repeat</label><select value={form.values.recurrence} onChange={e=>set('recurrence',e.target.value)}><option value="none">One-time</option><option value="weekly">Every week</option></select></div>
+        <div><label>Repeat</label><select value={form.values.recurrence} onChange={e=>set('recurrence',e.target.value)}><option value="none">One-time</option><option value="multi_day">Multi-day programme</option><option value="weekly">Every week</option></select></div>
+        {form.values.recurrence==='multi_day' && <div><label>Number of days *</label><input type="number" min="2" max="60" value={form.values.duration_days} onChange={e=>set('duration_days',e.target.value)} /><small className="muted">Creates one event entry for each consecutive day.</small></div>}
         {form.values.recurrence==='weekly' && <div><label>Repeat until *</label><input type="date" value={form.values.recurrence_end_date} onChange={e=>set('recurrence_end_date',e.target.value)} /><small className="muted">An event is created automatically for each 7-day interval.</small></div>}
         <div className="full"><label>Description</label><textarea value={form.values.description} onChange={e=>set('description',e.target.value)} /></div>
       </div>
@@ -1093,7 +1098,7 @@ export function SendSMS() {
         <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Type your message…" style={{ minHeight: 120 }} />
         <p className="muted sm">{message.length} characters · {segments || 0} SMS segment(s) per recipient (160 chars each).</p>
         {result && <div className={result.ok ? 'muted' : 'err'} style={{ marginBottom: 10 }}>{result.text}</div>}
-        <button className="primary" disabled={sending} onClick={send}>{sending ? 'Sending…' : `Send to ${recipients.length}`}</button>
+        <button className="primary" disabled={sending} onClick={send}>{sending ? 'Sending...' : `Send to ${recipients.length}`}</button>
       </div>
     </>
   );
@@ -1124,7 +1129,7 @@ export function Offerings() {
 }
 
 /* ---------------- First Fruit / Welfare Dues: shared monthly grid ---------------- */
-// Both funds follow the identical "member x 12 months" pattern from the old workbooks —
+// Both funds follow the identical "member x 12 months" pattern from the old workbooks
 // one editable grid, keyed by which roster and which fund it writes to.
 function ContributionsGrid({ fund, roster, title }) {
   const { data, save } = useData();
@@ -1352,13 +1357,17 @@ async function adminCall(body) {
   const { data, error } = await supabase.functions.invoke('admin-users', { body });
   if (error) {
     let m = error.message;
-    try { const j = await error.context?.json?.(); if (j?.error) m = j.error; } catch { /* keep default */ }
+    try {
+      const j = await error.context?.json?.();
+      if (j?.error) m = j.error;
+    } catch { /* keep default */ }
     if (/Failed to send|fetch/i.test(m)) m = 'Could not reach the server. Check your internet connection (and that the admin-users function is deployed).';
     throw new Error(m);
   }
   if (data?.error) throw new Error(data.error);
   return data;
 }
+
 const randomPassword = () => {
   const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const a = crypto.getRandomValues(new Uint32Array(10));
@@ -1367,113 +1376,658 @@ const randomPassword = () => {
 
 function UserDialog({ mode, target, onClose, onDone, currentRole }) {
   // mode: 'create' | 'reset'
-  const [f, setF] = useState({ full_name: '', email: '', role: 'viewer', password: randomPassword() });
+  const [f, setF] = useState({
+    member_id: '',
+    full_name: '',
+    phone: '',
+    role: 'viewer',
+    password: randomPassword()
+  });
+
+  const [members, setMembers] = useState([]);
+  const [memberSearch, setMemberSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [done, setDone] = useState(null);
-  const [roleOptions, setRoleOptions] = useState(isSuperAdmin(currentRole) ? ROLES.filter(r=>r!=='pending') : ROLES.filter((r) => r !== 'super_admin' && r !== 'pending'));
-  useEffect(()=>{ supabase.from('role_catalog').select('role_key').neq('role_key','pending').order('label').then(({data})=>{ if(data?.length) setRoleOptions(data.map(r=>r.role_key).filter(r=>isSuperAdmin(currentRole)||r!=='super_admin')); }); },[currentRole]);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const [roleOptions, setRoleOptions] = useState(
+    isSuperAdmin(currentRole)
+      ? ROLES.filter(r => r !== 'pending')
+      : ROLES.filter(r => r !== 'super_admin' && r !== 'pending')
+  );
+
+  // Load available members for account creation.
+  useEffect(() => {
+    if (mode !== 'create') return;
+
+    supabase
+      .from('members')
+      .select('id,name,member_code,phone,email,status')
+      .order('name')
+      .then(({ data, error }) => {
+        if (error) {
+          setErr(error.message);
+          return;
+        }
+
+        setMembers(
+          (data || []).filter(
+            m => !['Inactive', 'Left'].includes(m.status)
+          )
+        );
+      });
+  }, [mode]);
+
+  // Load roles.
+  useEffect(() => {
+    supabase
+      .from('role_catalog')
+      .select('role_key,label')
+      .neq('role_key', 'pending')
+      .order('label')
+      .then(({ data }) => {
+        if (data?.length) {
+          setRoleOptions(
+            data
+              .map(r => r.role_key)
+              .filter(
+                r => isSuperAdmin(currentRole) || r !== 'super_admin'
+              )
+          );
+        }
+      });
+  }, [currentRole]);
+
+  const set = (k) => (e) =>
+    setF({
+      ...f,
+      [k]: e.target.value
+    });
+
+  const chooseMember = (member) => {
+    setF({
+      ...f,
+      member_id: member.id,
+      full_name: member.name || '',
+      phone: member.phone || ''
+    });
+
+    setMemberSearch(member.name || '');
+    setErr('');
+  };
+
+  const matches = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+
+    if (!q) return members.slice(0, 30);
+
+    return members
+      .filter(m =>
+        `${m.name || ''} ${m.member_code || ''} ${m.phone || ''}`
+          .toLowerCase()
+          .includes(q)
+      )
+      .slice(0, 30);
+  }, [members, memberSearch]);
 
   async function submit(e) {
     e.preventDefault();
     setErr('');
-    if (f.password.length < 6) return setErr('Password must be at least 6 characters.');
+
+    if (f.password.length < 6) {
+      setErr('Password must be at least 6 characters.');
+      return;
+    }
+
+    if (mode === 'create') {
+      if (!f.member_id) {
+        setErr('Please select an existing member.');
+        return;
+      }
+
+      if (!f.phone) {
+        setErr('The selected member does not have a phone number.');
+        return;
+      }
+    }
+
     setBusy(true);
+
     try {
-      if (mode === 'create') await adminCall({ action: 'create', ...f });
-      else await adminCall({ action: 'reset_password', user_id: target.id, password: f.password });
-      setDone({ email: mode === 'create' ? f.email : target.email, password: f.password });
+      if (mode === 'create') {
+        await adminCall({
+          action: 'create',
+          member_id: f.member_id,
+          full_name: f.full_name,
+          phone: f.phone,
+          role: f.role,
+          password: f.password
+        });
+
+        setDone({
+          name: f.full_name,
+          phone: f.phone,
+          password: f.password
+        });
+      } else {
+        await adminCall({
+          action: 'reset_password',
+          user_id: target.id,
+          password: f.password
+        });
+
+        setDone({
+          name: target.full_name || 'User',
+          phone: target.phone || target.email || '',
+          password: f.password
+        });
+      }
+
       onDone();
-    } catch (ex) { setErr(ex.message); }
-    finally { setBusy(false); }
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <div className="modal" onClick={onClose}>
-      <div className="modalbox" onClick={(e) => e.stopPropagation()}>
-        <div className="modalhead"><h2>{mode === 'create' ? 'Create user account' : 'Reset password'}</h2><button className="x" onClick={onClose}>×</button></div>
+      <div
+        className="modalbox"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modalhead">
+          <h2>
+            {mode === 'create'
+              ? 'Create user account'
+              : 'Reset password'}
+          </h2>
+
+          <button className="x" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
         {done ? (
           <>
-            <p>{mode === 'create' ? 'Account created.' : 'Password changed.'} Give these details to the user (they can change the password later in Settings):</p>
-            <pre>{`Email:    ${done.email}\nPassword: ${done.password}`}</pre>
+            <p>
+              {mode === 'create'
+                ? 'Account created.'
+                : 'Password changed.'}{' '}
+              Give these login details to the user.
+            </p>
+
+            <pre>
+{`Name:      ${done.name}
+Phone:     ${displayMemberLogin(done.phone)}
+Password:  ${done.password}`}
+            </pre>
+
             <div className="btnrow">
-              <button className="secondary" onClick={() => navigator.clipboard?.writeText(`Email: ${done.email}\nPassword: ${done.password}`)}>Copy</button>
-              <button className="primary" onClick={onClose}>Done</button>
+              <button
+                className="secondary"
+                onClick={() =>
+                  navigator.clipboard?.writeText(
+                    `Name: ${done.name}\nPhone: ${displayMemberLogin(done.phone)}\nPassword: ${done.password}`
+                  )
+                }
+              >
+                Copy
+              </button>
+
+              <button
+                className="primary"
+                onClick={onClose}
+              >
+                Done
+              </button>
             </div>
           </>
         ) : (
           <form onSubmit={submit}>
-            {mode === 'reset' && <p className="muted">New password for <b>{target.full_name || target.email}</b> ({target.email}).</p>}
+            {mode === 'reset' && (
+              <p className="muted">
+                New password for{' '}
+                <b>
+                  {target.full_name ||
+                    target.phone ||
+                    target.email}
+                </b>
+                .
+              </p>
+            )}
+
             <div className="formgrid">
-              {mode === 'create' && <>
-                <div className="fld"><small>Full name</small><input value={f.full_name} onChange={set('full_name')} required /></div>
-                <div className="fld"><small>Email</small><input type="email" value={f.email} onChange={set('email')} required /></div>
-                <div className="fld"><small>Role</small>
-                  <select value={f.role} onChange={set('role')}>{roleOptions.map((r) => <option key={r}>{r}</option>)}</select>
-                </div>
-              </>}
-              <div className="fld"><small>{mode === 'create' ? 'Password' : 'New password'}</small>
-                <div className="btnrow" style={{ flexWrap: 'nowrap' }}>
-                  <input value={f.password} onChange={set('password')} required style={{ flex: 1 }} />
-                  <button type="button" className="secondary" onClick={() => setF({ ...f, password: randomPassword() })}>Generate</button>
+              {mode === 'create' && (
+                <>
+                  <div
+                    className="fld"
+                    style={{ gridColumn: '1 / -1' }}
+                  >
+                    <small>Search existing member</small>
+
+                    <input
+                      value={memberSearch}
+                      onChange={(e) => {
+                        setMemberSearch(e.target.value);
+                        setF({
+                          ...f,
+                          member_id: '',
+                          full_name: '',
+                          phone: ''
+                        });
+                      }}
+                      placeholder="Search by name, member ID or phone"
+                      autoFocus
+                    />
+
+                    {memberSearch && !f.member_id && (
+                      <div
+                        className="panel"
+                        style={{
+                          marginTop: 6,
+                          padding: 6,
+                          maxHeight: 220,
+                          overflowY: 'auto'
+                        }}
+                      >
+                        {matches.length ? (
+                          matches.map((m) => (
+                            <button
+                              type="button"
+                              key={m.id}
+                              className="secondary"
+                              style={{
+                                display: 'block',
+                                width: '100%',
+                                textAlign: 'left',
+                                marginBottom: 4
+                              }}
+                              onClick={() =>
+                                chooseMember(m)
+                              }
+                            >
+                              <b>{m.name}</b>
+                              <span className="muted">
+                                {' '}
+                                — {m.member_code || 'No ID'}
+                                {m.phone
+                                  ? ` — ${m.phone}`
+                                  : ' — No phone'}
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="empty">
+                            No matching active member found.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {f.member_id && (
+                    <>
+                      <div className="fld">
+                        <small>Selected member</small>
+                        <input
+                          value={f.full_name}
+                          readOnly
+                        />
+                      </div>
+
+                      <div className="fld">
+                        <small>Phone</small>
+                        <input
+                          value={f.phone}
+                          readOnly
+                        />
+                      </div>
+
+                      <div
+                        className="fld"
+                        style={{ gridColumn: '1 / -1' }}
+                      >
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => {
+                            setF({
+                              ...f,
+                              member_id: '',
+                              full_name: '',
+                              phone: ''
+                            });
+                            setMemberSearch('');
+                          }}
+                        >
+                          Change member
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="fld">
+                    <small>Role</small>
+
+                    <select
+                      value={f.role}
+                      onChange={set('role')}
+                    >
+                      {roleOptions.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div className="fld">
+                <small>
+                  {mode === 'create'
+                    ? 'Password'
+                    : 'New password'}
+                </small>
+
+                <div
+                  className="btnrow"
+                  style={{ flexWrap: 'nowrap' }}
+                >
+                  <input
+                    value={f.password}
+                    onChange={set('password')}
+                    required
+                    style={{ flex: 1 }}
+                  />
+
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() =>
+                      setF({
+                        ...f,
+                        password: randomPassword()
+                      })
+                    }
+                  >
+                    Generate
+                  </button>
                 </div>
               </div>
             </div>
-            {err && <div className="err" style={{ margin: '10px 0' }}>{err}</div>}
-            <div style={{ marginTop: 14 }}><button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'create' ? 'Create account' : 'Reset password'}</button></div>
+
+            {err && (
+              <div
+                className="err"
+                style={{ margin: '10px 0' }}
+              >
+                {err}
+              </div>
+            )}
+
+            <div style={{ marginTop: 14 }}>
+              <button
+                className="primary"
+                disabled={busy}
+              >
+                {busy
+                  ? 'Please wait...'
+                  : mode === 'create'
+                    ? 'Create account'
+                    : 'Reset password'}
+              </button>
+            </div>
           </form>
         )}
       </div>
     </div>
   );
 }
-
 export function Users() {
   const { user, role } = useAuth();
+
   const [rows, setRows] = useState(null);
   const [msg, setMsg] = useState('');
   const [dialog, setDialog] = useState(null);
   const [roleOptions, setRoleOptions] = useState([]);
 
   const load = async () => {
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at');
-    if (error) setMsg(error.message); else { setRows(data); setMsg(''); }
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at');
+
+    if (error) {
+      setMsg(error.message);
+    } else {
+      // Do not expose the Super Admin account to ordinary administrators.
+      setRows(role === 'super_admin' ? data : data.filter(account => account.role !== 'super_admin'));
+      setMsg('');
+    }
   };
-  useEffect(() => { load(); supabase.from('role_catalog').select('role_key,label').neq('role_key','pending').order('label').then(({data})=>{ if(data) setRoleOptions(data.map(r=>r.role_key).filter(r=>isSuperAdmin(role)||r!=='super_admin')); }); }, []);
+
+  useEffect(() => {
+    load();
+
+    supabase
+      .from('role_catalog')
+      .select('role_key,label')
+      .neq('role_key', 'pending')
+      .order('label')
+      .then(({ data }) => {
+        if (data) {
+          setRoleOptions(
+            data
+              .map(r => r.role_key)
+              .filter(
+                r =>
+                  isSuperAdmin(role) ||
+                  r !== 'super_admin'
+              )
+          );
+        }
+      });
+  }, []);
 
   const change = async (id, newRole) => {
-    try { await adminCall({ action: 'set_role', user_id: id, role: newRole }); load(); }
-    catch (ex) { setMsg(ex.message); }
+    try {
+      await adminCall({
+        action: 'set_role',
+        user_id: id,
+        role: newRole
+      });
+
+      load();
+    } catch (ex) {
+      setMsg(ex.message);
+    }
   };
 
   const remove = async (p) => {
-    if (!confirm(`Delete the account for ${p.full_name || p.email}? They will no longer be able to sign in. Records they created are kept.`)) return;
-    try { await adminCall({ action: 'delete', user_id: p.id }); load(); } catch (ex) { setMsg(ex.message); }
+    if (p?.role === 'super_admin') { setMsg('Super Admin accounts are protected and cannot be deleted.'); return; }
+    if (
+      !confirm(
+        `Delete the account for ${
+          p.full_name || p.phone || p.email
+        }? They will no longer be able to sign in. Records they created are kept.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await adminCall({
+        action: 'delete',
+        user_id: p.id
+      });
+
+      load();
+    } catch (ex) {
+      setMsg(ex.message);
+    }
   };
 
-  return <>
-    <div className="top">
-      <h1>Users</h1>
-      <div className="btnrow"><button className="secondary" onClick={load}>Refresh</button><button className="primary" onClick={() => setDialog({ mode: 'create' })}>+ Create user</button></div>
-    </div>
-    <div className="panel">
-      <p className="muted">Create accounts here and choose each person's role, or approve people who signed up themselves. This church uses a single-church structure, so there is no branch assignment.</p>
-      {msg && <div className="err">{msg}</div>}
-      <div className="tablewrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
-        <tbody>{(rows || []).map((p) => <tr key={p.id}>
-          <td><b>{p.full_name || '—'}</b></td><td>{p.email}</td>
-          <td><select value={p.role} disabled={p.id === user.id || (p.role === 'super_admin' && !isSuperAdmin(role))} onChange={(e) => change(p.id, e.target.value)}>{roleOptions.map(r => <option key={r}>{r}</option>)}</select></td>
-          <td>{String(p.created_at).slice(0, 10)}</td>
-          <td className="actions"><button className="secondary" onClick={() => setDialog({ mode: 'reset', target: p })}>Reset password</button>{p.id !== user.id && <button className="danger" onClick={() => remove(p)}>Delete</button>}</td>
-        </tr>)}
-        {rows && !rows.length && <tr><td colSpan="5" className="empty">No users.</td></tr>}
-        {!rows && <tr><td colSpan="5" className="empty">Loading…</td></tr>}</tbody>
-      </table></div>
-    </div>
-    {dialog && <UserDialog {...dialog} currentRole={role} onClose={() => setDialog(null)} onDone={load} />}
-  </>;
-}
+  return (
+    <>
+      <div className="top">
+        <h1>Users</h1>
+
+        <div className="btnrow">
+          <button
+            className="secondary"
+            onClick={load}
+          >
+            Refresh
+          </button>
+
+          <button
+            className="primary"
+            onClick={() =>
+              setDialog({ mode: 'create' })
+            }
+          >
+            + Create user
+          </button>
+        </div>
+      </div>
+
+      <div className="panel">
+        <p className="muted">
+          Select an existing church member, use their phone
+          number for login, and assign their role. This church
+          uses a single-church structure, so there is no branch
+          assignment.
+        </p>
+
+        {msg && (
+          <div className="err">
+            {msg}
+          </div>
+        )}
+
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Joined</th>
+                <th></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {(rows || []).map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <b>
+                      {p.full_name || '—'}
+                    </b>
+                  </td>
+
+                  <td>
+                    {p.phone || '—'}
+                  </td>
+
+                  <td>
+                    <select
+                      value={p.role}
+                      disabled={
+                        p.id === user.id ||
+                        (
+                          p.role === 'super_admin' &&
+                          !isSuperAdmin(role)
+                        )
+                      }
+                      onChange={(e) =>
+                        change(
+                          p.id,
+                          e.target.value
+                        )
+                      }
+                    >
+                      {roleOptions.map((r) => (
+                        <option
+                          key={r}
+                          value={r}
+                        >
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+
+                  <td>
+                    {String(
+                      p.created_at
+                    ).slice(0, 10)}
+                  </td>
+
+                  <td className="actions">
+                    {p.role !== 'super_admin' && (
+                      <button
+                        className="secondary"
+                        onClick={() => setDialog({ mode: 'reset', target: p })}
+                      >
+                        Reset password
+                      </button>
+                    )}
+
+                    {p.id !== user.id && p.role !== 'super_admin' && (
+                      <button
+                        className="danger"
+                        onClick={() =>
+                          remove(p)
+                        }
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+
+              {rows && !rows.length && (
+                <tr>
+                  <td
+                    colSpan="5"
+                    className="empty"
+                  >
+                    No users.
+                  </td>
+                </tr>
+              )}
+
+              {!rows && (
+                <tr>
+                  <td
+                    colSpan="5"
+                    className="empty"
+                  >
+                    Loading...
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {dialog && (
+        <UserDialog
+          {...dialog}
+          currentRole={role}
+          onClose={() => setDialog(null)}
+          onDone={load}
+        />
+      )}
+    </>
+  );
+};
 
 export function Visitors() {
   return <Crud table="visitors" title="Visitors" noun="visitor" sortKey="visit_date" sortDir="desc" searchKeys={['name','phone','email','source','notes']}
@@ -1548,7 +2102,7 @@ export function ABCClass() {
       <div><label>Meeting</label><input value="Every Sunday" readOnly /></div>
     </div><div className="toolbar"><button className="primary" onClick={saveSetup} disabled={!canWrite}>Save ABC Class Setup</button>{group?.status === 'Active' && <button className="danger" onClick={completeClass} disabled={!canWrite}>Mark Class Completed</button>}{setupMsg&&<span className="muted">{setupMsg}</span>}</div></div>
     <div className="panel"><h2>Class Register</h2><div className="toolbar"><input placeholder="Search member by name or ID…" value={q} onChange={e=>setQ(e.target.value)} /><select value={selectedMember} onChange={e=>setSelectedMember(e.target.value)}><option value="">Select member</option>{matches.map(m=><option key={m.id} value={m.id}>{m.member_code} · {m.name}</option>)}</select><button className="primary" onClick={registerMember} disabled={!canWrite || !group || !selectedMember || participantIds.has(selectedMember)}>Add to ABC Class</button></div><div className="tablewrap"><table><thead><tr><th>Member ID</th><th>Name</th><th>Group</th><th>Action</th></tr></thead><tbody>{participants.map(p=>{const m=members.find(x=>x.id===p.member_id);return <tr key={p.id}><td>{m?.member_code||''}</td><td>{m?.name||'Unknown'}</td><td>{m?.member_type||'Adult'}</td><td>{canWrite&&<button className="danger sm" onClick={()=>remove('group_members',p.id)}>Remove</button>}</td></tr>})}{!participants.length&&<tr><td colSpan="4" className="empty">No members registered for this ABC Class yet.</td></tr>}</tbody></table></div></div>
-    <div className="panel"><h2>Weekly Attendance Register</h2><div className="toolbar"><div className="fld"><small>Sunday</small><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><span className="badge">Week {weekNo}{completed ? ' · Completed' : ''}</span></div><div className="tablewrap"><table><thead><tr><th>Member ID</th><th>Member</th><th>Present</th></tr></thead><tbody>{participants.map(p=>{const m=members.find(x=>x.id===p.member_id);const a=attendance.get(p.member_id);return <tr key={p.id}><td>{m?.member_code||''}</td><td><b>{m?.name||'Unknown'}</b></td><td><button className={a?.present?'primary':'secondary'} onClick={()=>toggleAttendance(p.member_id)} disabled={!canWrite||completed}>{a?.present?'✓ Present':'Mark Present'}</button></td></tr>})}{!participants.length&&<tr><td colSpan="3" className="empty">Register members above first.</td></tr>}</tbody></table></div></div>
+    <div className="panel"><h2>Weekly Attendance Register</h2><div className="toolbar"><div className="fld"><small>Sunday</small><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><span className="badge">Week {weekNo}{completed ? ' · Completed' : ''}</span></div><div className="tablewrap"><table><thead><tr><th>Member ID</th><th>Member</th><th>Present</th></tr></thead><tbody>{participants.map(p=>{const m=members.find(x=>x.id===p.member_id);const a=attendance.get(p.member_id);return <tr key={p.id}><td>{m?.member_code||''}</td><td><b>{m?.name||'Unknown'}</b></td><td><button className={a?.present?'primary':'secondary'} onClick={()=>toggleAttendance(p.member_id)} disabled={!canWrite||completed}>{a?.present?'Present':'Mark Present'}</button></td></tr>})}{!participants.length&&<tr><td colSpan="3" className="empty">Register members above first.</td></tr>}</tbody></table></div></div>
   </>;
 }
 
@@ -1618,11 +2172,94 @@ export function PastoralCare() {
     columns={[{label:'Opened',key:'opened_date'},{label:'Person',key:'person_name'},{label:'Category',key:'category'},{label:'Assigned',key:'assigned_to'},{label:'Priority',render:r=>badge(r.priority)},{label:'Status',render:r=>badge(r.status)}]}/>
 }
 
+// ---- Audit Log: readable "Record" labels ----------------------------------------------------------
+// The audit log stores a snapshot of the row that changed. Instead of showing the raw UUID, build a
+// short description from that snapshot (member ID + name, receipt number, amount, date ...).
+// The full ID stays available as a hover tooltip. Pastoral cases store no content on purpose,
+// so those rows fall back to a short reference.
+const auditPretty = (v) => String(v || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const AUDIT_LABELS = {
+  members: (s) => [s.member_code, s.name],
+  profiles: (s) => [s.full_name || s.email, auditPretty(s.role)],
+  attendance: (s, who) => [who('person_name'), s.date, s.service],
+  attendance_headcount: (s) => [s.date, s.service, `${headcountLabel(s.category || '')}: ${s.count}`],
+  giving: (s, who) => [who('giver'), s.amount != null && money(s.amount), s.type, s.date],
+  departments: (s) => [s.name],
+  events: (s) => [s.title, s.date],
+  offering_entries: (s) => [s.category, s.amount != null && money(s.amount), s.date],
+  member_contributions: (s, who) => [who('person_name'), s.fund, s.month && s.year ? `${MONTHS[Number(s.month) - 1] || s.month} ${s.year}` : s.year, s.amount != null && money(s.amount)],
+  welfare_members: (s) => [s.ac_no && `A/C ${s.ac_no}`, s.name],
+  welfare_transactions: (s) => [s.kind, s.item, s.amount != null && money(s.amount), s.date],
+  visitors: (s) => [s.name, s.visit_date],
+  groups: (s) => [s.name],
+  follow_ups: (s, who) => [who('person_name'), s.category, s.date],
+  prayer_requests: (s, who) => [s.confidential ? 'Confidential request' : who('requester'), s.date],
+  volunteers: (s) => [s.person_name, s.ministry],
+  service_plans: (s) => [s.service_date, s.service_name, s.service_item],
+  finance_weekly_reports: (s) => [s.week_no && `Week ${s.week_no}${s.year ? ` ${s.year}` : ''}`, s.date, s.grand_total != null && money(s.grand_total)],
+  finance_weekly_cash_counts: (s) => ['Weekly cash count', s.category, s.denomination != null && `${s.quantity} x ${s.denomination}`],
+  finance_weekly_momo: (s) => ['Weekly MoMo', s.category, s.provider, s.amount != null && money(s.amount)],
+  finance_weekday_collections: (s) => ['Weekday collection', s.collection_date],
+  finance_weekday_cash_counts: (s) => ['Weekday cash count', s.denomination != null && `${s.quantity} x ${s.denomination}`],
+  finance_weekday_momo: (s) => ['Weekday MoMo', s.provider, s.amount != null && money(s.amount)],
+  finance_reconciliations: (s) => [s.date, s.method_filter, s.status],
+  pledges: (s) => [s.member_name, s.project, s.pledged_amount != null && money(s.pledged_amount)],
+  payment_receipts: (s) => [s.receipt_number || s.reference, s.member_name, s.amount != null && money(s.amount)],
+  payment_requests: (s) => [s.reference, s.member_name, s.amount != null && money(s.amount)],
+  expenditures: (s) => [s.pv_no && `PV ${s.pv_no}`, s.description, s.amount != null && money(s.amount)]
+};
+const auditSnapshot = (r) => (r.action === 'DELETE' ? r.old_row : r.new_row || r.old_row) || null;
+function auditRecordLabel(r, memberMap) {
+  if (r.action === 'PURGE' && r.new_row) return `${r.new_row.deleted} entries removed`;
+  const s = auditSnapshot(r);
+  const shortId = r.row_id ? `Ref ${String(r.row_id).slice(0, 8)}` : '';
+  if (!s) return shortId;
+  const m = memberMap[s.member_id];
+  const who = (key) => [m?.member_code, s[key] || m?.name].filter(Boolean).join(' · ');
+  const build = AUDIT_LABELS[r.table_name];
+  let parts = build ? build(s, who) : [s.name, s.title, s.person_name];
+  parts = parts.filter((x) => x !== undefined && x !== null && x !== false && String(x).trim() !== '' && !/undefined|NaN/.test(String(x)));
+  return parts.length ? parts.join(' · ') : shortId;
+}
+
+const AUDIT_SKIP_FIELDS = new Set(['id', 'updated_at', 'created_at', 'created_by', 'updated_by']);
+const auditValue = (k, v) => {
+  if (v === null || v === undefined || v === '') return 'empty';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'object') v = JSON.stringify(v);
+  if (/(amount|total)$/.test(k) && !isNaN(Number(v))) return money(v);
+  const t = String(v);
+  return t.length > 40 ? `${t.slice(0, 40)}...` : t;
+};
+// For UPDATE rows: list which fields changed, e.g. "Status: Active -> Inactive".
+function auditChanges(r) {
+  if (r.action !== 'UPDATE' || !r.old_row || !r.new_row) return [];
+  const hide = r.table_name === 'prayer_requests' && (r.new_row.confidential || r.old_row.confidential) ? new Set(['request', 'notes']) : null;
+  const out = [];
+  for (const k of Object.keys(r.new_row)) {
+    if (AUDIT_SKIP_FIELDS.has(k)) continue;
+    if (JSON.stringify(r.old_row[k]) === JSON.stringify(r.new_row[k])) continue;
+    out.push(hide && hide.has(k) ? `${auditPretty(k)} changed` : `${auditPretty(k)}: ${auditValue(k, r.old_row[k])} \u2192 ${auditValue(k, r.new_row[k])}`);
+  }
+  return out;
+}
 export function AuditLog() {
   const { role } = useAuth();
   const [rows,setRows]=useState([]); const [error,setError]=useState(''); const [notice,setNotice]=useState('');
   const [olderThan,setOlderThan]=useState('365'); const [busy,setBusy]=useState(false);
-  const load=()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(({data,error})=>{if(error)setError(error.message);else{setError('');setRows(data||[]);}});
+  const [memberMap,setMemberMap]=useState({});
+  const load=()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(async({data,error})=>{
+    if(error){setError(error.message);return;}
+    setError(''); const list=data||[]; setRows(list);
+    // Look up member ID + name for rows that point at a member, so they can be shown as e.g. "TTA12 · Kwame Mensah".
+    const ids=[...new Set(list.map(r=>(auditSnapshot(r)||{}).member_id).filter(Boolean))];
+    const map={};
+    for(let i=0;i<ids.length;i+=100){
+      const { data: ms } = await supabase.from('members').select('id,member_code,name').in('id', ids.slice(i,i+100));
+      (ms||[]).forEach(m=>{map[m.id]=m;});
+    }
+    setMemberMap(map);
+  });
   useEffect(()=>{ if(!isAdmin(role)) return; load(); },[role]);
   const purge=async()=>{
     const days=Number(olderThan);
@@ -1640,9 +2277,9 @@ export function AuditLog() {
     {isSuperAdmin(role)&&<div className="panel"><div className="btnrow" style={{alignItems:'center',flexWrap:'wrap'}}>
       <span>Clean up: delete entries older than</span>
       <select value={olderThan} onChange={e=>setOlderThan(e.target.value)} disabled={busy}><option value="90">3 months</option><option value="180">6 months</option><option value="365">1 year</option><option value="730">2 years</option></select>
-      <button className="danger" disabled={busy} onClick={purge}>{busy?'Deleting…':'Delete old entries'}</button>
+      <button className="danger" disabled={busy} onClick={purge}>{busy?'Deleting...':'Delete old entries'}</button>
     </div><p className="muted" style={{marginBottom:0}}>Only the Super Admin can do this. The list below shows the latest 300 entries.</p></div>}
-    <div className="panel">{error&&<div className="err">{error}</div>}{notice&&<div style={{color:'var(--ok)',fontSize:13,marginBottom:8}}>{notice}</div>}<div className="tablewrap"><table><thead><tr><th>Time</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{new Date(r.at).toLocaleString()}</td><td>{r.table_name}</td><td>{badge(r.action)}</td><td>{r.row_id||(r.action==='PURGE'&&r.new_row?`${r.new_row.deleted} entries removed`:'')}</td><td>{r.actor_name || r.actor || 'System'}</td></tr>)}{!rows.length&&<tr><td colSpan="5" className="empty">No audit records.</td></tr>}</tbody></table></div></div></>;
+    <div className="panel">{error&&<div className="err">{error}</div>}{notice&&<div style={{color:'var(--ok)',fontSize:13,marginBottom:8}}>{notice}</div>}<div className="tablewrap"><table><thead><tr><th>Time</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{new Date(r.at).toLocaleString()}</td><td>{r.table_name}</td><td>{badge(r.action)}</td><td title={r.row_id||''}>{auditRecordLabel(r,memberMap)}{(()=>{const ch=auditChanges(r); return ch.length>0&&<div className="muted sm" style={{marginTop:4}}>{ch.slice(0,4).map((c,i)=><div key={i}>{c}</div>)}{ch.length>4&&<div>+{ch.length-4} more</div>}</div>;})()}</td><td>{r.actor_name || r.actor || 'System'}</td></tr>)}{!rows.length&&<tr><td colSpan="5" className="empty">No audit records.</td></tr>}</tbody></table></div></div></>;
 }
 
 /* ---------------- Settings ---------------- */
@@ -1673,6 +2310,8 @@ function ChangePassword() {
 export function Settings() {
   const { user, profile, role } = useAuth();
   const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed, clearTestData } = useData();
+  const accountMember = (data.members || []).find(m => m.user_id === user?.id || (profile?.member_id && m.id === profile.member_id));
+  const accountLabel = accountMember?.phone || formatLoginId(user?.email) || user?.email;
   const [resetPhrase, setResetPhrase] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
   const [resetMsg, setResetMsg] = useState(null);
@@ -1701,7 +2340,7 @@ export function Settings() {
       <div className="top"><h1>Settings</h1></div>
       <div className="panel">
         <h2>Account</h2>
-        <p><b>{profile?.full_name || user.email}</b><br /><span className="muted">{user.email} · role: {profile?.role}</span></p>
+        <p><b>{profile?.full_name || accountLabel}</b><br /><span className="muted">{accountLabel} · role: {profile?.role}</span></p>
         <ChangePassword />
       </div>
       <div className="panel">
@@ -1723,21 +2362,21 @@ export function Settings() {
         )}
       </div>
       {isSuperAdmin(role) && <div className="panel" style={{ border: '2px solid #b91c1c' }}>
-          <h2>🔴 Clear Test Data</h2>
+          <h2>Clear Test Data</h2>
           <p className="muted">Super Admin only. Use this once testing is complete. It permanently removes operational/test records from the church database while keeping administrator accounts, user roles, database structure and system settings.</p>
           <p><b>Before using this:</b> make a backup if you may need any of the test records later.</p>
           <label>Type <code>CLEAR TEST DATA</code> to confirm</label>
           <input value={resetPhrase} onChange={e => setResetPhrase(e.target.value)} placeholder="CLEAR TEST DATA" style={{ width: '100%', maxWidth: 420, marginBottom: 10 }} disabled={resetBusy} />
           {resetMsg && <div className={resetMsg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{resetMsg.t}</div>}
-          <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data…' : 'Permanently Clear Test Data'}</button>
+          <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data...' : 'Permanently Clear Test Data'}</button>
         </div>}
-      <div className="panel">
+      {(isAdmin(role) || isSuperAdmin(role)) && <div className="panel">
         <h2>Backup</h2>
-        <p className="muted">Your data lives in Supabase. Download a copy of what this device can see:</p>
+        <p className="muted">Your data lives in Supabase. Download a copy of what this device can see. This is for administrators only.</p>
         <button className="secondary" onClick={() => download(`church-backup-${today()}.json`, JSON.stringify({ exportedAt: new Date().toISOString(), data }, null, 2), 'application/json')}>
           Download JSON backup
         </button>
-      </div>
+      </div>}
     </>
   );
 }
@@ -2060,9 +2699,17 @@ export function OmegaCheckIn() { return <QuickAttendanceList memberType="Omega" 
 
 /* ---------------- Major Modules V11 ---------------- */
 export function FinanceCenter() {
+  const { role } = useAuth();
+  if (!['admin','finance','finance_reviewer','pastor'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Center</h2><p className="muted">Finance access is restricted.</p></div>;
+  return <FinanceCenterScreen />;
+}
+
+function FinanceCenterScreen() {
   const { data, save, remove } = useData();
-  const { role, profile } = useAuth();
-  if (!['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Center</h2><p className="muted">Finance access is restricted.</p></div>;
+  const { role, profile, hasPermission } = useAuth();
+  const canReviewFinance = hasPermission('finance_reviewer.approve');
+  const isPastor = role === 'pastor';
+  const canPrepareFinance = hasPermission('finance.manage') && !isPastor && !canReviewFinance;
 
   const DENOMS = [200,100,50,20,10,5,2,1,0.5,0.2,0.1];
   const CATS = OFFERING_CATEGORIES;
@@ -2132,10 +2779,20 @@ export function FinanceCenter() {
   const addWeekdayCollection=()=>setWeekdayEntries(xs=>[...xs,emptyWeekdayEntry(date)]);
   const removeWeekdayCollection=(id)=>setWeekdayEntries(xs=>xs.filter(x=>x.id!==id));
 
-  const saveWeekly = () => {
+  const transitionWeekly = (nextStatus, extra={}) => {
+    if (!report) return;
+    const next = {...report, status:nextStatus, ...extra};
+    save('finance_weekly_reports', next); setReport(next); setStatus(nextStatus);
+    setMsg(`Week ${weekNo} ${nextStatus.toLowerCase()}.`);
+  };
+
+  const saveWeekly = (nextStatus=status, extra={}) => {
+    if (report && !['Draft','Reopened','Returned'].includes(report.status)) { setMsg('This report is locked. Only the Pastor can authorise reopening it.'); return; }
     const id=reportId||uuid();
-    const row={id,date,week_no:Number(weekNo),year:Number(date.slice(0,4)),month:Number(date.slice(5,7)),status,notes,prepared_by_name:report?.prepared_by_name||profile?.full_name||'',checked_by_name:checkedBy,approved_by_name:approvedBy,total_cash:Number(totalCash.toFixed(2)),total_momo:Number(totalMomo.toFixed(2)),grand_total:Number(grandTotal.toFixed(2))};
-    save('finance_weekly_reports',row); setReportId(id); setReport(row);
+    const row={id,date,week_no:Number(weekNo),year:Number(date.slice(0,4)),month:Number(date.slice(5,7)),status:nextStatus,notes,prepared_by_name:report?.prepared_by_name||profile?.full_name||'',checked_by_name:checkedBy,approved_by_name:nextStatus==='Approved'?(profile?.full_name||'Finance Reviewer'):approvedBy,total_cash:Number(totalCash.toFixed(2)),total_momo:Number(totalMomo.toFixed(2)),grand_total:Number(grandTotal.toFixed(2)),...extra};
+    setStatus(nextStatus);
+    const stagingRow = {...row, status: (nextStatus === 'Submitted' || nextStatus === 'Approved') ? (report?.status === 'Reopened' ? 'Reopened' : 'Draft') : nextStatus};
+    save('finance_weekly_reports',stagingRow); setReportId(id); setReport(row);
 
     const existingCash=cashRows.filter(x=>x.report_id===id); const existingStandardCash=existingCash.filter(x=>x.category!=='Weekday Offering');
     STANDARD_CATS.forEach(cat=>DENOMS.forEach(d=>{ const qty=Number(counts[`${cat}|${d}`]||0); const old=existingStandardCash.find(x=>x.category===cat && Number(x.denomination)===Number(d)); if(qty>0){const rid=old?.id||uuid();save('finance_weekly_cash_counts',{id:rid,report_id:id,category:cat,denomination:d,quantity:qty});} else if(old) remove('finance_weekly_cash_counts',old.id); }));
@@ -2159,7 +2816,8 @@ export function FinanceCenter() {
       if(amount>0){save('finance_weekday_momo',{id:oldMomo?.id||uuid(),collection_id:entry.id,amount:Number(amount.toFixed(2)),provider:entry.provider||'',reference:entry.reference||''});}
       else if(oldMomo) remove('finance_weekday_momo',oldMomo.id);
     });
-    setMsg(`Week ${weekNo} saved. Total: ${money(grandTotal)}.`);
+    if (nextStatus !== stagingRow.status) save('finance_weekly_reports', row);
+    setMsg(`Week ${weekNo} ${nextStatus.toLowerCase()}. Total: ${money(grandTotal)}.`);
   };
 
   const rowsForYear = reports.filter(r=>Number(r.year||String(r.date).slice(0,4))===Number(year));
@@ -2188,7 +2846,7 @@ export function FinanceCenter() {
     <div className="weekday-collection-head"><div><h3>Weekday Collection {index+1}</h3><span>Enter the actual collection date. Tuesday, Thursday or any special-program day is allowed.</span></div><div className="weekday-collection-total">{money(weekdayEntryTotal(entry))}</div></div>
     <div className="weekday-meta-grid">
       <div><label>Collection date</label><input type="date" value={entry.collection_date||date} onChange={e=>updateWeekday(entry.id,{collection_date:e.target.value})}/></div>
-      <div className="weekday-day-display"><label>Day</label><div>{entry.collection_date?new Date(`${entry.collection_date}T00:00:00`).toLocaleDateString(undefined,{weekday:'long'}):'—'}</div></div>
+      <div className="weekday-day-display"><label>Day</label><div>{entry.collection_date?new Date(`${entry.collection_date}T00:00:00`).toLocaleDateString(undefined,{weekday:'long'}): '—'}</div></div>
       <div><label>Notes / program</label><input value={entry.notes||''} onChange={e=>updateWeekday(entry.id,{notes:e.target.value})} placeholder="e.g. Tuesday service / special program"/></div>
     </div>
     <div className="finance-denom-grid weekday-denom-grid">{DENOMS.map(d=><div className="finance-denom weekday-denom" key={d}>
@@ -2205,12 +2863,13 @@ export function FinanceCenter() {
     <div className="top"><div><h1>Church Finance</h1><div className="muted">Weekly cash-counting workflow based on the church finance workbook. Attendance remains in the Attendance module.</div></div></div>
     <div className="toolbar" style={{marginBottom:12}}><button className={tab==='weekly'?'primary':''} onClick={()=>setTab('weekly')}>Weekly Cash Report</button><button className={tab==='monthly'?'primary':''} onClick={()=>setTab('monthly')}>Monthly</button><button className={tab==='quarterly'?'primary':''} onClick={()=>setTab('quarterly')}>Quarterly</button><button className={tab==='yearly'?'primary':''} onClick={()=>setTab('yearly')}>Yearly</button><button className={tab==='firstfruit'?'primary':''} onClick={()=>setTab('firstfruit')}>First Fruit Register</button><button className={tab==='receipts'?'primary':''} onClick={()=>setTab('receipts')}>Digital Receipts</button></div>
     {tab==='weekly' && <>
-      <div className="panel finance-header-panel"><div className="formgrid finance-header-grid"><div><label>Report date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><div><label>Week number</label><select value={weekNo} onChange={e=>setWeekNo(Number(e.target.value))}>{[1,2,3,4,5].map(n=><option key={n} value={n}>Week {n}</option>)}</select></div><div><label>Status</label><select value={status} onChange={e=>setStatus(e.target.value)}><option>Draft</option><option>Submitted</option><option>Checked</option><option>Approved</option></select></div><div><label>Checked by</label><input value={checkedBy} onChange={e=>setCheckedBy(e.target.value)} /></div><div><label>Approved by / Head Pastor</label><input value={approvedBy} onChange={e=>setApprovedBy(e.target.value)} /></div><div><label>Notes</label><input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional notes" /></div></div></div>
+      <div className="panel finance-header-panel"><div className="formgrid finance-header-grid"><div><label>Report date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><div><label>Week number</label><select value={weekNo} onChange={e=>setWeekNo(Number(e.target.value))}>{[1,2,3,4,5].map(n=><option key={n} value={n}>Week {n}</option>)}</select></div><div><label>Workflow status</label><input value={report?.status || 'Draft'} readOnly />{report?.review_reason&&<small className="muted">Reviewer note: {report.review_reason}</small>}{report?.reopen_reason&&<small className="muted"> Reopen reason: {report.reopen_reason}</small>}</div></div></div>
+      <fieldset disabled={!canPrepareFinance || (!!report && !['Draft','Reopened','Returned'].includes(report.status))} style={{border:0,padding:0,margin:0,minWidth:0}}><div className="panel finance-header-panel"><div className="formgrid finance-header-grid"><div><label>Checked by</label><input value={checkedBy} onChange={e=>setCheckedBy(e.target.value)} /></div><div><label>Approval recorded by Finance Reviewer</label><input value={approvedBy} onChange={e=>setApprovedBy(e.target.value)} readOnly={!canPrepareFinance} /></div><div><label>Notes</label><input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional notes" /></div></div></div>
       <div className="finance-offering-grid">{STANDARD_CATS.map((cat,catIndex)=><div className={`finance-offering-card finance-offering-${catIndex%4}`} key={cat}>
         <div className="finance-offering-head"><div><h2>{cat}</h2><span>Enter cash quantities below</span></div><strong>{money(categoryTotal(cat))}</strong></div>
         <div className="finance-denom-grid">{DENOMS.map(d=><div className="finance-denom" key={d}>
-          <div className="finance-denom-name">GH₵ {d.toFixed(d<1?2:0)}</div>
-          <input className="finance-qty" aria-label={`${cat} GH₵ ${d} quantity`} type="number" min="0" step="1" value={counts[`${cat}|${d}`]||''} onChange={e=>setQty(cat,d,e.target.value)} placeholder="0" />
+      <div className="finance-denom-name">GH₵ {d.toFixed(d<1?2:0)}</div>
+      <input className="finance-qty" aria-label={`${cat} GH₵ ${d} quantity`} type="number" min="0" step="1" value={counts[`${cat}|${d}`]||''} onChange={e=>setQty(cat,d,e.target.value)} placeholder="0" />
           <div className="finance-denom-amount">{money(d*Number(counts[`${cat}|${d}`]||0))}</div>
         </div>)}</div>
         <div className="finance-cash-total"><span>Cash total</span><b>{money(cashTotal(cat))}</b></div>
@@ -2218,14 +2877,14 @@ export function FinanceCenter() {
       </div>)}</div>
 
       <div className="weekday-section">
-        <div className="weekday-section-head"><div><h2>Weekday Offering Collections</h2><p>Record each Tuesday, Thursday, or special-program collection separately. Add as many collection days as actually occurred during this week.</p></div><button type="button" className="primary" onClick={addWeekdayCollection}>＋ Add Collection</button></div>
-        {!weekdayEntries.length && <div className="weekday-empty">No weekday collection added yet. Use <b>＋ Add Collection</b> when a weekday offering was collected.</div>}
+        <div className="weekday-section-head"><div><h2>Weekday Offering Collections</h2><p>Record each Tuesday, Thursday, or special-program collection separately. Add as many collection days as actually occurred during this week.</p></div><button type="button" className="primary" onClick={addWeekdayCollection}>+ Add Collection</button></div>
+        {!weekdayEntries.length && <div className="weekday-empty">No weekday collection added yet. Use <b>+ Add Collection</b> when a weekday offering was collected.</div>}
         {weekdayEntries.map((entry,index)=><WeekdayCollectionCard entry={entry} index={index} key={entry.id}/>) }
         {weekdayEntries.length>0 && <div className="weekday-grand-total"><span>Weekday Offering Total</span><b>{money(weekdayTotal)}</b></div>}
       </div>
 
       <div className="cards"><div className="card"><div className="label">Total cash</div><div className="num">{money(totalCash)}</div></div><div className="card"><div className="label">Total MoMo</div><div className="num">{money(totalMomo)}</div></div><div className="card"><div className="label">Weekly total</div><div className="num" style={{fontSize:22}}>{money(grandTotal)}</div></div></div>
-      <div className="toolbar"><button className="primary" onClick={saveWeekly}>Save weekly report</button>{msg&&<span className="muted">{msg}</span>}</div>
+      </fieldset><div className="toolbar">{canPrepareFinance && (!report || ['Draft','Reopened','Returned'].includes(report.status)) && <><button className="secondary" onClick={()=>saveWeekly('Draft')}>Save Draft</button><button className="primary" onClick={()=>saveWeekly('Submitted',{review_reason:null})}>Submit for review</button></>}{canReviewFinance && report?.status==='Submitted' && <><button className="primary" onClick={()=>transitionWeekly('Approved',{approved_by_name:profile?.full_name||'Finance Reviewer',approved_at:new Date().toISOString(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString(),review_reason:null})}>Approve &amp; Lock</button><button className="secondary" onClick={()=>{const reason=window.prompt('Explain what must be corrected before resubmission:');if(reason&&reason.trim())transitionWeekly('Returned',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Return for correction</button><button className="secondary" onClick={()=>{const reason=window.prompt('Reason for rejecting this report:');if(reason&&reason.trim())transitionWeekly('Rejected',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Reject</button></>}{role==='pastor' && ['Approved','Rejected'].includes(report?.status) && <button className="secondary" onClick={()=>{const reason=window.prompt('Why must this locked report be reopened?');if(reason&&reason.trim())transitionWeekly('Reopened',{reopen_reason:reason.trim(),reopened_by_name:profile?.full_name||'Pastor',reopened_at:new Date().toISOString()});}}>Authorise Reopening</button>}{msg&&<span className="muted">{msg}</span>}</div>
     </>}
     {tab==='monthly' && <><div className="panel"><div className="fld"><small>Year</small><input type="number" value={year} onChange={e=>setYear(Number(e.target.value)||year)} /></div></div><SummaryTable rows={monthRows} title={`Monthly Finance Summary · ${year}`} /></>}
     {tab==='quarterly' && <><div className="panel"><div className="fld"><small>Year</small><input type="number" value={year} onChange={e=>setYear(Number(e.target.value)||year)} /></div></div><SummaryTable rows={quarterRows} title={`Quarterly Finance Summary · ${year}`} /></>}
@@ -2234,6 +2893,769 @@ export function FinanceCenter() {
     {tab==='receipts' && <MemberGiving />}
   </>;
 }
+
+
+/* ---------------- Church Expenditure ---------------- */
+export function Expenditure() {
+  const { hasPermission } = useAuth();
+  if (!hasPermission('finance.view')) {
+    return (
+      <div className="panel">
+        <h2>Expenditure</h2>
+        <p className="muted">You do not have permission to view Expenditure. Ask a Super Admin to enable it under Role Permissions.</p>
+      </div>
+    );
+  }
+  return <ExpenditureScreen />;
+}
+
+function ExpenditureScreen() {
+  const { data, save, remove } = useData();
+  const { hasPermission, role, profile } = useAuth();
+
+  const canWrite = hasPermission('finance.manage') && role !== 'pastor' && !hasPermission('finance_reviewer.approve');
+  const canReviewFinance = hasPermission('finance_reviewer.approve');
+  const isPastor = role === 'pastor';
+
+  const [date, setDate] = useState(today());
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('Other');
+  const [amount, setAmount] = useState('');
+  const [payee, setPayee] = useState('');
+  const [pvNo, setPvNo] = useState('');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [notes, setNotes] = useState('');
+  const [editingId, setEditingId] = useState('');
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+
+  const rows = useMemo(() => {
+    const q = String(search || '').trim().toLowerCase();
+
+    return [...(data.expenditures || [])]
+      .filter(r => {
+        if (!q) return true;
+        return [
+          r.description,
+          r.category,
+          r.payee,
+          r.pv_no,
+          r.payment_reference,
+          r.payment_method,
+          r.notes
+        ].some(v => String(v || '').toLowerCase().includes(q));
+      })
+      .sort((a, b) => {
+        const d = String(b.date || '').localeCompare(String(a.date || ''));
+        if (d !== 0) return d;
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+      });
+  }, [data.expenditures, search]);
+
+  const displayedTotal = rows.reduce(
+    (sum, r) => sum + Number(r.amount || 0),
+    0
+  );
+
+  function resetForm() {
+    setDate(today());
+    setDescription('');
+    setCategory('Other');
+    setAmount('');
+    setPayee('');
+    setPvNo('');
+    setPaymentReference('');
+    setPaymentMethod('Cash');
+    setNotes('');
+    setEditingId('');
+  }
+
+  function editRow(row) {
+    if (!['Draft','Reopened','Returned',undefined,null,''].includes(row.status)) { setStatus('This expenditure is locked. Only the Pastor can authorise reopening it.'); return; }
+    setEditingId(row.id);
+    setDate(String(row.date || '').slice(0, 10) || today());
+    setDescription(row.description || '');
+    setCategory(row.category || 'Other');
+    setAmount(row.amount ?? '');
+    setPayee(row.payee || '');
+    setPvNo(row.pv_no || '');
+    setPaymentReference(row.payment_reference || '');
+    setPaymentMethod(row.payment_method || 'Cash');
+    setNotes(row.notes || '');
+    setStatus('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function saveExpenditure() {
+    const value = Number(amount);
+
+    if (!date || !description.trim()) {
+      setStatus('Enter the date and expenditure description.');
+      return;
+    }
+
+    if (!Number.isFinite(value) || value <= 0) {
+      setStatus('Enter a valid expenditure amount greater than zero.');
+      return;
+    }
+
+    const existingExpense = (data.expenditures || []).find(r => r.id === editingId);
+    if (existingExpense && !['Draft','Reopened','Returned',undefined,null,''].includes(existingExpense.status)) { setStatus('This expenditure is locked.'); return; }
+    save('expenditures', {
+      id: editingId || uuid(),
+      status: existingExpense?.status || 'Draft',
+      date,
+      description: description.trim(),
+      category: category || 'Other',
+      amount: Number(value.toFixed(2)),
+      payee: payee.trim(),
+      pv_no: pvNo.trim(),
+      payment_reference: paymentReference.trim(),
+      payment_method: paymentMethod || 'Cash',
+      notes: notes.trim()
+    });
+
+    setStatus(editingId ? 'Expenditure updated.' : 'Expenditure recorded.');
+    resetForm();
+  }
+
+  function changeExpenditureStatus(row, nextStatus, extra={}) {
+    if (nextStatus === 'Reopened' && !isPastor) return;
+    if (['Approved','Returned','Rejected'].includes(nextStatus) && !canReviewFinance) return;
+    if (['Returned','Rejected'].includes(nextStatus) && !String(extra.review_reason||'').trim()) { setStatus('A reason is required to return or reject a record.'); return; }
+    if (nextStatus === 'Submitted' && !canWrite) return;
+    save('expenditures', {...row, status:nextStatus, ...(nextStatus==='Submitted'?{review_reason:null,reviewed_by_name:null,reviewed_at:null}:{}), ...(nextStatus==='Approved'?{approved_by_name:profile?.full_name||'Finance Reviewer',approved_at:new Date().toISOString(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()}:{}), ...extra});
+    setStatus(`Expenditure ${nextStatus.toLowerCase()}.`);
+  }
+
+  function deleteExpenditure(row) {
+    if (!canWrite || !['Draft','Reopened','Returned',undefined,null,''].includes(row.status)) { setStatus('Only draft records can be deleted. Approved financial records must be corrected transparently.'); return; }
+
+    if (!window.confirm(
+      `Delete this expenditure of ${money(Number(row.amount || 0))}?`
+    )) return;
+
+    remove('expenditures', row.id);
+    if (editingId === row.id) resetForm();
+    setStatus('Expenditure deleted.');
+  }
+
+  return (
+    <>
+      <div className="top">
+        <div>
+          <h1>Expenditure</h1>
+          <div className="muted">
+            Record Church expenditure payments. These records will later feed the Church Cashbook as payments.
+          </div>
+        </div>
+      </div>
+
+      {canWrite && (
+        <div className="panel">
+          <div className="toolbar">
+            <div>
+              <h2>{editingId ? 'Edit Expenditure' : 'Record Expenditure'}</h2>
+              <div className="muted">
+                Welfare transactions are not included here.
+              </div>
+            </div>
+          </div>
+
+          <div className="formgrid">
+            <div>
+              <label>Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label>Amount (GHS)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label>Description</label>
+              <input
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="What was the church payment for?"
+              />
+            </div>
+
+            <div>
+              <label>Category</label>
+              <select
+                value={category}
+                onChange={e => setCategory(e.target.value)}
+              >
+                <option>Utilities</option>
+                <option>Maintenance</option>
+                <option>Transport</option>
+                <option>Stationery</option>
+                <option>Church Program</option>
+                <option>Equipment</option>
+                <option>Staff / Ministerial</option>
+                <option>Other</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Payee</label>
+              <input
+                value={payee}
+                onChange={e => setPayee(e.target.value)}
+                placeholder="Person or supplier paid"
+              />
+            </div>
+
+            <div>
+              <label>PV No.</label>
+              <input
+                value={pvNo}
+                onChange={e => setPvNo(e.target.value)}
+                placeholder="Payment voucher number"
+              />
+            </div>
+
+            <div>
+              <label>Cheque / Payment Reference</label>
+              <input
+                value={paymentReference}
+                onChange={e => setPaymentReference(e.target.value)}
+                placeholder="Cheque no. / transfer reference"
+              />
+            </div>
+
+            <div>
+              <label>Payment Method</label>
+              <select
+                value={paymentMethod}
+                onChange={e => setPaymentMethod(e.target.value)}
+              >
+                <option>Cash</option>
+                <option>Mobile Money</option>
+                <option>Bank Transfer</option>
+                <option>Cheque</option>
+                <option>Other</option>
+              </select>
+            </div>
+
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label>Notes</label>
+              <input
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Optional note"
+              />
+            </div>
+          </div>
+
+          {status && (
+            <div className="muted" style={{ marginTop: 10 }}>
+              {status}
+            </div>
+          )}
+
+          <div className="toolbar" style={{ marginTop: 12 }}>
+            <button className="primary" onClick={saveExpenditure}>
+              {editingId ? 'Update Expenditure' : 'Save Expenditure'}
+            </button>
+
+            {editingId && (
+              <button className="secondary" onClick={resetForm}>
+                Cancel Edit
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="toolbar">
+          <div>
+            <h2>Church Expenditure</h2>
+            <div className="muted">
+              Displayed total: <b>{money(displayedTotal)}</b>
+            </div>
+          </div>
+
+          <div className="fld">
+            <small>Search</small>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Description, payee, PV..."
+            />
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <p className="muted">No expenditure records found.</p>
+        ) : (
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Category</th>
+                  <th>Payee</th>
+                  <th>PV No.</th>
+                  <th>Payment Ref.</th>
+                  <th>Method</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  {(canWrite || isPastor || canReviewFinance) && <th>Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.id}>
+                    <td>{String(row.date || '').slice(0, 10)}</td>
+                    <td>{row.description}</td>
+                    <td>{row.category || 'Other'}</td>
+                    <td>{row.payee || '—'}</td>
+                    <td>{row.pv_no || '—'}</td>
+                    <td>{row.payment_reference || '—'}</td>
+                    <td>{row.payment_method || '—'}</td>
+                    <td><b>{money(Number(row.amount || 0))}</b></td>
+                    <td>{row.status || 'Draft'}{row.review_reason&&<div className="muted sm">Review note: {row.review_reason}</div>}</td>
+                    {(canWrite || isPastor || canReviewFinance) && (
+                      <td>
+                        {canWrite && (!row.status || ['Draft','Reopened','Returned'].includes(row.status)) && <><button className="secondary" onClick={() => editRow(row)}>Edit</button>{' '}<button className="secondary" onClick={() => deleteExpenditure(row)}>Delete</button>{' '}<button className="primary" onClick={() => changeExpenditureStatus(row,'Submitted',{review_reason:null,reviewed_by_name:null,reviewed_at:null})}>Submit</button></>}{row.status==='Submitted' && <span className="muted">Awaiting Finance Reviewer</span>}{canReviewFinance && row.status==='Submitted' && <><button className="primary" onClick={() => changeExpenditureStatus(row,'Approved')}>Approve &amp; Lock</button>{' '}<button className="secondary" onClick={() => {const reason=window.prompt('Explain what must be corrected:');if(reason&&reason.trim())changeExpenditureStatus(row,'Returned',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Return</button>{' '}<button className="secondary" onClick={() => {const reason=window.prompt('Reason for rejection:');if(reason&&reason.trim())changeExpenditureStatus(row,'Rejected',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Reject</button></>}{isPastor && ['Approved','Rejected'].includes(row.status) && <button className="secondary" onClick={() => {const reason=window.prompt('Why must this locked expenditure be reopened?');if(reason&&reason.trim())changeExpenditureStatus(row,'Reopened',{reopen_reason:reason.trim(),reopened_by_name:profile?.full_name||'Pastor',reopened_at:new Date().toISOString()});}}>Authorise Reopening</button>}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+
+/* ---------------- Church Cashbook ---------------- */
+export function Cashbook() {
+  const { data, save, remove } = useData();
+  const { role } = useAuth();
+  const canWrite = ['admin','finance','secretary'].includes(role) || isSuperAdmin(role);
+  const canDelete = role === 'admin' || isSuperAdmin(role);
+
+  const [type, setType] = useState('Receipt');
+  const [date, setDate] = useState(today());
+  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState('');
+  const [payee, setPayee] = useState('');
+  const [pvNo, setPvNo] = useState('');
+  const [receiptNo, setReceiptNo] = useState('');
+  const [search, setSearch] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [status, setStatus] = useState('');
+  const [openingYear, setOpeningYear] = useState(String(new Date().getFullYear()));
+
+  // Every entry from every source, in date order, each with the balance after it.
+  const ledger = useMemo(() => {
+    const manualRows = [...(data.cashbook_entries || [])];
+
+    const reports = data.finance_weekly_reports || [];
+    const cashRows = data.finance_weekly_cash_counts || [];
+    const momoRows = data.finance_weekly_momo || [];
+    const weekdayRows = data.finance_weekday_collections || [];
+    const weekdayCashRows = data.finance_weekday_cash_counts || [];
+    const weekdayMomoRows = data.finance_weekday_momo || [];
+
+    // One receipt per weekly Finance Center report, dated on the report date (Sunday).
+    // Weekday collections are included in this total, not shown as separate receipts.
+    const financeRows = reports.map(r => {
+      const weeklyCash = cashRows
+        .filter(x => x.report_id === r.id && x.category !== 'Weekday Offering')
+        .reduce((sum, x) => sum + Number(x.denomination || 0) * Number(x.quantity || 0), 0);
+
+      const weeklyMomo = momoRows
+        .filter(x => x.report_id === r.id && x.category !== 'Weekday Offering')
+        .reduce((sum, x) => sum + Number(x.amount || 0), 0);
+
+      const weekdayTotal = weekdayRows
+        .filter(x => x.report_id === r.id)
+        .reduce((sum, x) => {
+          const weekdayCash = weekdayCashRows
+            .filter(y => y.collection_id === x.id)
+            .reduce((s, y) => s + Number(y.denomination || 0) * Number(y.quantity || 0), 0);
+
+          const weekdayMomo = weekdayMomoRows
+            .filter(y => y.collection_id === x.id)
+            .reduce((s, y) => s + Number(y.amount || 0), 0);
+
+          return sum + weekdayCash + weekdayMomo;
+        }, 0);
+
+      return {
+        id: `finance-weekly-${r.id}`,
+        entry_date: String(r.date || '').slice(0, 10),
+        entry_type: 'Receipt',
+        description: 'Weekly collections (including weekday collections)',
+        amount: Number((weeklyCash + weeklyMomo + weekdayTotal).toFixed(2)),
+        payee: '',
+        pv_no: '',
+        receipt_no: '',
+        cheque_no: '',
+        source_type: 'Finance Center',
+        source_id: r.id,
+        created_at: r.created_at || ''
+      };
+    }).filter(r => r.entry_date && r.amount > 0);
+
+    const expenditureRows = [...(data.expenditures || [])].map(r => ({
+      id: `expenditure-${r.id}`,
+      entry_date: String(r.date || '').slice(0, 10),
+      entry_type: 'Payment',
+      description: r.description || r.category || 'Expenditure',
+      amount: Number(r.amount || 0),
+      payee: r.payee || '',
+      pv_no: r.pv_no || '',
+      receipt_no: '',
+      cheque_no: '',
+      source_type: 'Expenditure',
+      source_id: r.id,
+      created_at: r.created_at || ''
+    }));
+
+    const rank = (r) => (r.entry_type === 'Opening' ? 0 : 1);
+    const sorted = [...manualRows, ...financeRows, ...expenditureRows].sort((a,b) =>
+      String(a.entry_date || '').localeCompare(String(b.entry_date || '')) ||
+      rank(a) - rank(b) ||
+      String(a.created_at || '').localeCompare(String(b.created_at || ''))
+    );
+
+    // An Opening entry states the balance on that date, so it re-bases the running total.
+    // This stops a year's carried-forward balance being counted twice.
+    let bal = 0;
+    return sorted.map(r => {
+      const amt = Number(r.amount || 0);
+      bal = r.entry_type === 'Opening' ? amt : r.entry_type === 'Receipt' ? bal + amt : bal - amt;
+      bal = Number(bal.toFixed(2));
+      return { ...r, balance: bal };
+    });
+  }, [
+    data.cashbook_entries,
+    data.finance_weekly_reports,
+    data.finance_weekly_cash_counts,
+    data.finance_weekly_momo,
+    data.finance_weekday_collections,
+    data.finance_weekday_cash_counts,
+    data.finance_weekday_momo,
+    data.expenditures
+  ]);
+
+  // The date range decides the totals. The search box only narrows the list, never the balance.
+  const inRange = useMemo(() => ledger
+    .filter(r => !fromDate || String(r.entry_date || '') >= fromDate)
+    .filter(r => !toDate || String(r.entry_date || '') <= toDate), [ledger, fromDate, toDate]);
+
+  const broughtForward = useMemo(() => {
+    if (!fromDate) return 0;
+    const before = ledger.filter(r => String(r.entry_date || '') < fromDate);
+    return before.length ? before[before.length - 1].balance : 0;
+  }, [ledger, fromDate]);
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return inRange;
+    return inRange.filter(r =>
+      [r.description, r.payee, r.pv_no, r.receipt_no, r.cheque_no, r.source_type]
+        .some(v => String(v || '').toLowerCase().includes(q))
+    );
+  }, [inRange, search]);
+
+  const receipts = Number(inRange.filter(r => r.entry_type === 'Receipt').reduce((s,r) => s + Number(r.amount || 0), 0).toFixed(2));
+  const payments = Number(inRange.filter(r => r.entry_type === 'Payment').reduce((s,r) => s + Number(r.amount || 0), 0).toFixed(2));
+  const balance = inRange.length ? inRange[inRange.length - 1].balance : broughtForward;
+  const opening = Number((balance - receipts + payments).toFixed(2));
+
+  function addEntry(e) {
+    e.preventDefault();
+
+    const year = String(openingYear || '').trim();
+    const n = Number(amount);
+
+    if (!/^\d{4}$/.test(year) || Number(year) < 1900 || Number(year) > 9999) {
+      setStatus('Enter a valid four-digit year.');
+      return;
+    }
+
+    if (String(amount).trim() === '' || !Number.isFinite(n) || n < 0) {
+      setStatus('Enter an opening balance of zero or more.');
+      return;
+    }
+
+    const existing = (data.cashbook_entries || []).find(x =>
+      x.entry_type === 'Opening' &&
+      String(x.entry_date || '').slice(0, 4) === year
+    );
+
+    save('cashbook_entries', {
+      ...(existing || {}),
+      id: existing ? existing.id : uuid(),
+      entry_date: `${year}-01-01`,
+      entry_type: 'Opening',
+      description: `Opening Balance ${year}`,
+      amount: Number(n.toFixed(2)),
+      payee: '',
+      pv_no: '',
+      receipt_no: '',
+      source_type: 'manual'
+    });
+
+    setStatus(`Opening Balance for ${year} saved.`);
+    setAmount('');
+  }
+  if (!canWrite && role !== 'viewer') {
+    return (
+      <div className="panel">
+        <h2>Church Cashbook</h2>
+        <p className="muted">
+          You do not have permission to access the Cashbook.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="top">
+        <div>
+          <h1>Church Cashbook</h1>
+          <div className="muted">
+            Record and review church cash receipts and payments.
+            Finance Center weekly collections feed receipts, including weekday collections under the Sunday date. Expenditure feeds payments automatically.
+          </div>
+        </div>
+      </div>
+
+      <div className="cards">
+        <div className="card">
+          <div className="label">Opening</div>
+          <div className="num" style={{fontSize:22}}>{money(opening)}</div>
+        </div>
+
+        <div className="card">
+          <div className="label">Receipts</div>
+          <div className="num" style={{fontSize:22}}>{money(receipts)}</div>
+        </div>
+
+        <div className="card">
+          <div className="label">Payments</div>
+          <div className="num" style={{fontSize:22}}>{money(payments)}</div>
+        </div>
+
+        <div className="card">
+          <div className="label">Balance</div>
+          <div className="num" style={{fontSize:22}}>{money(balance)}</div>
+        </div>
+      </div>
+
+      {canWrite && (
+        <div className="panel">
+          <h2>Set Opening Balance</h2>
+          <p className="muted">Enter the cash balance on 1 January of a year. It replaces the balance carried forward from earlier years, so it is never counted twice. Saving again for the same year updates it.</p>
+          <form onSubmit={addEntry}>
+            <div className="grid2">
+              <label>
+                Year
+                <input
+                  type="number"
+                  min="1900"
+                  max="9999"
+                  step="1"
+                  required
+                  value={openingYear}
+                  onChange={e => setOpeningYear(e.target.value)}
+                />
+              </label>
+              <label>
+                Opening Balance (GH₵)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  placeholder="0.00"
+                />
+              </label>
+            </div>
+            <div className="toolbar">
+              <button className="primary" type="submit">Save Opening Balance</button>
+            </div>
+            {status && (
+              <div className="success" style={{marginTop:8}}>
+                {status}
+              </div>
+            )}
+          </form>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="top">
+          <div>
+            <h2>Cashbook Entries</h2>
+            <div className="muted">
+              Opening + receipts − payments = balance. The cards follow the From / To dates; search only narrows the list.
+            </div>
+          </div>
+
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search description, payee, PV..."
+          />
+        </div>
+
+        <div className="toolbar">
+          <label>
+            From
+            <input
+              type="date"
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+            />
+          </label>
+
+          <label>
+            To
+            <input
+              type="date"
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFromDate('');
+              setToDate('');
+              setSearch('');
+            }}
+          >
+            Clear Filters
+          </button>
+        </div>
+
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Payee</th>
+                <th>PV / Receipt</th>
+                <th>Receipt</th>
+                <th>Payment</th>
+                <th>Balance</th>
+                <th></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {fromDate && !search.trim() && (
+                <tr>
+                  <td>{fromDate}</td>
+                  <td colSpan="4"><b>Balance brought forward</b></td>
+                  <td></td>
+                  <td><b>{money(broughtForward)}</b></td>
+                  <td></td>
+                </tr>
+              )}
+
+              {rows.map(r => {
+                return (
+                  <tr key={r.id}>
+                    <td>{r.entry_date}</td>
+
+                    <td>
+                      <b>{r.description}</b>
+
+                      {r.source_type !== 'manual' && (
+                        <>
+                          <br />
+                          <small className="muted">
+                            Linked {r.source_type}
+                          </small>
+                        </>
+                      )}
+                    </td>
+
+                    <td>{r.payee || ''}</td>
+
+                    <td>{r.pv_no || r.receipt_no || ''}</td>
+
+                    <td>
+                      {r.entry_type === 'Receipt' ||
+                      r.entry_type === 'Opening'
+                        ? money(r.amount)
+                        : ''}
+                    </td>
+
+                    <td>
+                      {r.entry_type === 'Payment'
+                        ? money(r.amount)
+                        : ''}
+                    </td>
+
+                    <td>
+                      <b>{money(r.balance)}</b>
+                    </td>
+
+                    <td>
+                      {canDelete && r.source_type === 'manual' && (
+                        <button
+                          className="danger"
+                          onClick={() =>
+                            remove('cashbook_entries', r.id)
+                          }
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {!rows.length && (
+                <tr>
+                  <td colSpan="8" className="empty">
+                    No Cashbook entries found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
 
 export function CommunicationCenter() {
   const { data } = useData();
@@ -2244,31 +3666,260 @@ export function CommunicationCenter() {
   return <>
     <div className="top"><div><h1>Communication Center</h1><div className="muted">Manage church announcements and prepare targeted member communication.</div></div></div>
     <div className="cards"><div className="card"><div className="label">Active members with phone</div><div className="num">{active}</div></div><div className="card"><div className="label">Announcements</div><div className="num">{data.announcements.length}</div></div></div>
-    <Crud table="announcements" title="Church Announcements" noun="announcement" sortKey="created_at" sortDir="desc" searchKeys={['title','body','audience']} defaults={{audience:'All Members',status:'Published'}}
-      filters={[{key:'status',label:'All statuses',options:['Draft','Published','Archived']},{key:'audience',label:'All audiences',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']} ]}
-      fields={[{key:'title',label:'Title',required:true},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']},{key:'publish_date',label:'Publish date',type:'date'},{key:'status',label:'Status',type:'select',options:['Draft','Published','Archived'],required:true},{key:'expires_date',label:'Expires',type:'date'}]}
-      columns={[{label:'Title',key:'title'},{label:'Audience',key:'audience'},{label:'Publish',key:'publish_date'},{label:'Status',render:a=>badge(a.status)}]}
+    <Crud table="announcements" title="Church Announcements" noun="announcement" allowWrite={true} sortKey="created_at" sortDir="desc" searchKeys={['title','body','audience']} defaults={{audience:'All Members',active:true}}
+      filters={[{key:'active',label:'All statuses',options:['true','false']} ,{key:'audience',label:'All audiences',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']} ]}
+      fields={[{key:'title',label:'Title',required:true},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']},{key:'publish_from',label:'Publish from',type:'date'},{key:'publish_until',label:'Publish until',type:'date'},{key:'active',label:'Published / active',type:'checkbox'}]}
+      columns={[{label:'Title',key:'title'},{label:'Announcement content',key:'body'},{label:'Audience',key:'audience'},{label:'Publish from',key:'publish_from'},{label:'Status',render:a=>badge(a.active===false?'Inactive':'Active')}]}
     />
-    <div className="panel"><h2>Latest announcements</h2>{announcements.length?announcements.map(a=><p key={a.id}><b>{a.title}</b><br/><span className="muted">{a.audience} · {a.status}</span></p>):<div className="empty">No announcements yet.</div>}</div>
+    <div className="panel"><h2>Latest announcements</h2>{announcements.length?announcements.map(a=><p key={a.id}><b>{a.title}</b><br/><span>{a.body || 'No message content'}</span><br/><span className="muted">{a.audience} · {a.active===false?'Inactive':'Published'}</span></p>):<div className="empty">No announcements yet.</div>}</div>
   </>;
 }
 
-export function PastorDashboard() {
-  const { data } = useData();
-  const { role } = useAuth();
-  if (!['admin','secretary','viewer'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
-  const openCases=data.pastoral_cases.filter(x=>!['Closed','Resolved'].includes(x.status)).length;
-  const openFollow=data.follow_ups.filter(x=>['Open','In Progress'].includes(x.status)).length;
-  const prayers=data.prayer_requests.filter(x=>!['Answered','Closed'].includes(x.status)).length;
-  const visitors=data.visitors.filter(x=>String(x.visit_date||'').slice(0,7)===today().slice(0,7)).length;
-  const active=data.members.filter(x=>x.status==='Active').length;
-  const lastDates=[...new Set(data.attendance.map(a=>a.date))].sort().reverse().slice(0,6);
-  const trend=lastDates.map(d=>({date:d,present:data.attendance.filter(a=>a.date===d&&a.status==='Present').length}));
+export function PastorDashboard({ onNavigate }) {
+  const { data, save } = useData();
+  const { role, profile } = useAuth();
+  const canCase = can(role, 'pastoral_cases', 'write') || role === 'pastor' || isSuperAdmin(role);
+  const canFollow = can(role, 'follow_ups', 'write') || role === 'pastor' || isSuperAdmin(role);
+  const [panel, setPanel] = useState(null); // 'case' | 'followup' | 'prayers' | null
+  const [msg, setMsg] = useState('');
+  const [caseForm, setCaseForm] = useState({ opened_date: today(), member_id: '', person_name: '', category: 'Counselling', assigned_to: '', priority: 'Normal', status: 'Open', next_follow_up: '', private_notes: '' });
+  const [followForm, setFollowForm] = useState({ date: today(), member_id: '', person_name: '', phone: '', category: 'Member', reason: '', assigned_to: '', method: 'Phone', status: 'Open', notes: '' });
+  const [memberQ, setMemberQ] = useState('');
+
+  if (!['admin','secretary','viewer','pastor'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
+
+  const pastoralCases = data.pastoral_cases || [];
+  const followUps = data.follow_ups || [];
+  const prayerRequests = data.prayer_requests || [];
+  const visitorsList = data.visitors || [];
+  const membersList = data.members || [];
+  const attendanceList = data.attendance || [];
+  const openCases = pastoralCases.filter(x => !['Closed','Resolved'].includes(x.status)).length;
+  const openFollow = followUps.filter(x => ['Open','In Progress'].includes(x.status)).length;
+  const prayers = prayerRequests.filter(x => !['Answered','Closed','Praying'].includes(x.status) || ['New','Assigned','Praying','Open'].includes(x.status)).length;
+  const openPrayers = prayerRequests.filter(x => !['Answered','Closed'].includes(x.status));
+  const visitors = visitorsList.filter(x => String(x.visit_date || '').slice(0, 7) === today().slice(0, 7)).length;
+  const active = membersList.filter(x => x.status === 'Active').length;
+  const financeReports = data.finance_weekly_reports || [];
+  const financeExpenses = data.expenditures || [];
+  const pendingFinance = financeReports.filter(x => x.status === 'Submitted').length + financeExpenses.filter(x => x.status === 'Submitted').length;
+  const lockedIncome = financeReports.filter(x => x.status === 'Approved').reduce((sum, x) => sum + Number(x.grand_total || 0), 0);
+  const lockedExpense = financeExpenses.filter(x => x.status === 'Approved').reduce((sum, x) => sum + Number(x.amount || 0), 0);
+  const lastDates = [...new Set(attendanceList.map(a => a.date))].sort().reverse().slice(0, 6);
+  const trend = lastDates.map(d => ({ date: d, present: attendanceList.filter(a => a.date === d && a.status === 'Present').length }));
+
+  const memberMatches = useMemo(() => {
+    const q = memberQ.trim().toLowerCase();
+    if (!q) return membersList.filter(m => m.status === 'Active').slice(0, 8);
+    return membersList.filter(m =>
+      String(m.name || '').toLowerCase().includes(q) ||
+      String(m.member_code || '').toLowerCase().includes(q) ||
+      String(m.phone || '').includes(q)
+    ).slice(0, 12);
+  }, [membersList, memberQ]);
+
+  const pickMember = (m, kind) => {
+    setMemberQ(m.name || '');
+    if (kind === 'case') setCaseForm(f => ({ ...f, member_id: m.id, person_name: m.name || '' }));
+    else setFollowForm(f => ({ ...f, member_id: m.id, person_name: m.name || '', phone: m.phone || f.phone }));
+  };
+
+  const submitCase = (e) => {
+    e.preventDefault();
+    if (!caseForm.person_name.trim() || !caseForm.category) { setMsg('Member and category are required.'); return; }
+    save('pastoral_cases', {
+      id: uuid(),
+      opened_date: caseForm.opened_date || today(),
+      member_id: caseForm.member_id || null,
+      person_name: caseForm.person_name.trim(),
+      category: caseForm.category,
+      assigned_to: caseForm.assigned_to.trim() || (profile?.full_name || ''),
+      priority: caseForm.priority || 'Normal',
+      status: caseForm.status || 'Open',
+      next_follow_up: caseForm.next_follow_up || null,
+      private_notes: caseForm.private_notes || '',
+    });
+    setMsg('Pastoral case saved.');
+    setPanel(null);
+    setCaseForm({ opened_date: today(), member_id: '', person_name: '', category: 'Counselling', assigned_to: '', priority: 'Normal', status: 'Open', next_follow_up: '', private_notes: '' });
+    setMemberQ('');
+  };
+
+  const submitFollow = (e) => {
+    e.preventDefault();
+    if (!followForm.person_name.trim() || !followForm.reason.trim()) { setMsg('Member and reason are required.'); return; }
+    save('follow_ups', {
+      id: uuid(),
+      date: followForm.date || today(),
+      member_id: followForm.member_id || null,
+      person_name: followForm.person_name.trim(),
+      phone: followForm.phone || '',
+      category: followForm.category || 'Member',
+      reason: followForm.reason.trim(),
+      assigned_to: followForm.assigned_to.trim() || (profile?.full_name || ''),
+      method: followForm.method || 'Phone',
+      status: followForm.status || 'Open',
+      notes: followForm.notes || '',
+    });
+    setMsg('Follow-up saved.');
+    setPanel(null);
+    setFollowForm({ date: today(), member_id: '', person_name: '', phone: '', category: 'Member', reason: '', assigned_to: '', method: 'Phone', status: 'Open', notes: '' });
+    setMemberQ('');
+  };
+
+  const openPanel = (name) => {
+    setMsg('');
+    setMemberQ('');
+    setPanel(name);
+  };
+
   return <>
-    <div className="top"><div><h1>Pastoral Dashboard</h1><div className="muted">A leadership view of people, care and engagement.</div></div></div>
-    <div className="cards"><div className="card"><div className="label">Active members</div><div className="num">{active}</div></div><div className="card"><div className="label">Open follow-ups</div><div className="num">{openFollow}</div></div><div className="card"><div className="label">Open pastoral cases</div><div className="num">{openCases}</div></div><div className="card"><div className="label">Prayer requests</div><div className="num">{prayers}</div></div><div className="card"><div className="label">Visitors this month</div><div className="num">{visitors}</div></div></div>
-    <div className="grid2"><div className="panel"><h2>Recent attendance trend</h2>{trend.length?<div className="tablewrap"><table><thead><tr><th>Date</th><th>Present</th></tr></thead><tbody>{trend.map(x=><tr key={x.date}><td>{x.date}</td><td><b>{x.present}</b></td></tr>)}</tbody></table></div>:<div className="empty">No attendance records.</div>}</div>
-    <div className="panel"><h2>Pastoral priorities</h2><p><b>{openCases}</b> pastoral cases require attention.</p><p><b>{openFollow}</b> follow-ups are open or in progress.</p><p><b>{prayers}</b> prayer requests are active.</p><p className="muted sm">Use the Ministry and Follow-up sections to open each record.</p></div></div>
+    <div className="top">
+      <div>
+        <h1>Pastoral Dashboard</h1>
+        <div className="muted">A leadership view of people, care and engagement. Quick actions stay on this page.</div>
+      </div>
+      <div className="toolbar">
+        {canCase && <button className="primary" type="button" onClick={() => openPanel('case')}>+ Add pastoral case</button>}
+        {canFollow && <button className="secondary" type="button" onClick={() => openPanel('followup')}>+ Add follow-up</button>}
+        <button className="secondary" type="button" onClick={() => openPanel('prayers')}>View prayer requests</button>
+      </div>
+    </div>
+    {msg && <div className="panel" style={{ borderColor: '#c6f6d5', background: '#f0fff4' }}><p className="muted" style={{ margin: 0 }}>{msg}</p></div>}
+
+    {panel === 'case' && canCase && (
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="pastor-case-title" onClick={(e) => { if (e.target === e.currentTarget) setPanel(null); }}>
+        <div className="modalbox pastor-modal">
+          <div className="modalhead">
+            <div>
+              <h2 id="pastor-case-title">New pastoral case</h2>
+              <p className="muted sm" style={{ margin: '4px 0 0' }}>Record care details. Confidential notes stay with pastoral staff.</p>
+            </div>
+            <button type="button" className="secondary pastor-close-btn" onClick={() => setPanel(null)} aria-label="Close">✕ Close</button>
+          </div>
+          <form onSubmit={submitCase}>
+            <div className="formgrid pastor-form-grid">
+              <div><label>Opened date</label><input type="date" value={caseForm.opened_date} onChange={e => setCaseForm(f => ({ ...f, opened_date: e.target.value }))} required /></div>
+              <div><label>Priority</label><select value={caseForm.priority} onChange={e => setCaseForm(f => ({ ...f, priority: e.target.value }))}>{['Low','Normal','High','Urgent'].map(o => <option key={o}>{o}</option>)}</select></div>
+              <div className="full"><label>Member</label>
+                <input value={memberQ} onChange={e => { setMemberQ(e.target.value); setCaseForm(f => ({ ...f, person_name: e.target.value, member_id: '' })); }} placeholder="Search by name, member ID or phone…" required autoComplete="off" />
+                {memberQ && <div className="pastor-member-hits">{memberMatches.map(m => (
+                  <button type="button" key={m.id} className={'pastor-member-hit' + (caseForm.member_id === m.id ? ' selected' : '')} onClick={() => pickMember(m, 'case')}>
+                    <strong>{m.name}</strong>
+                    <span>{[m.member_code, m.phone].filter(Boolean).join(' · ') || 'No ID / phone'}</span>
+                  </button>
+                ))}{!memberMatches.length && <div className="muted sm">No matching members — the name you typed will still be saved.</div>}</div>}
+                {caseForm.member_id && <div className="muted sm" style={{ marginTop: 6 }}>Linked member selected.</div>}
+              </div>
+              <div><label>Category</label><select value={caseForm.category} onChange={e => setCaseForm(f => ({ ...f, category: e.target.value }))}>{['Counselling','Prayer / Spiritual Support','Hospital / Illness','Bereavement','Marriage / Family','Financial / Welfare','Crisis / Emergency','New Member Follow-up','Other'].map(o => <option key={o}>{o}</option>)}</select></div>
+              <div><label>Status</label><select value={caseForm.status} onChange={e => setCaseForm(f => ({ ...f, status: e.target.value }))}>{['Open','In Progress','Resolved','Closed'].map(o => <option key={o}>{o}</option>)}</select></div>
+              <div><label>Assigned to</label><input value={caseForm.assigned_to} onChange={e => setCaseForm(f => ({ ...f, assigned_to: e.target.value }))} placeholder="Pastor or care leader" /></div>
+              <div><label>Next follow-up</label><input type="date" value={caseForm.next_follow_up} onChange={e => setCaseForm(f => ({ ...f, next_follow_up: e.target.value }))} /></div>
+              <div className="full"><label>Confidential notes</label><textarea rows={4} value={caseForm.private_notes} onChange={e => setCaseForm(f => ({ ...f, private_notes: e.target.value }))} placeholder="Private pastoral notes…" /></div>
+            </div>
+            <div className="pastor-form-actions">
+              <button type="button" className="secondary" onClick={() => setPanel(null)}>Close</button>
+              <button className="primary" type="submit">Save pastoral case</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+
+    {panel === 'followup' && canFollow && (
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="pastor-follow-title" onClick={(e) => { if (e.target === e.currentTarget) setPanel(null); }}>
+        <div className="modalbox pastor-modal">
+          <div className="modalhead">
+            <div>
+              <h2 id="pastor-follow-title">New follow-up</h2>
+              <p className="muted sm" style={{ margin: '4px 0 0' }}>Schedule or record a follow-up contact with a member or visitor.</p>
+            </div>
+            <button type="button" className="secondary pastor-close-btn" onClick={() => setPanel(null)} aria-label="Close">✕ Close</button>
+          </div>
+          <form onSubmit={submitFollow}>
+            <div className="formgrid pastor-form-grid">
+              <div><label>Date</label><input type="date" value={followForm.date} onChange={e => setFollowForm(f => ({ ...f, date: e.target.value }))} required /></div>
+              <div><label>Method</label><select value={followForm.method} onChange={e => setFollowForm(f => ({ ...f, method: e.target.value }))}>{['Phone','Visit','SMS','In Person'].map(o => <option key={o}>{o}</option>)}</select></div>
+              <div className="full"><label>Member</label>
+                <input value={memberQ} onChange={e => { setMemberQ(e.target.value); setFollowForm(f => ({ ...f, person_name: e.target.value, member_id: '' })); }} placeholder="Search by name, member ID or phone…" required autoComplete="off" />
+                {memberQ && <div className="pastor-member-hits">{memberMatches.map(m => (
+                  <button type="button" key={m.id} className={'pastor-member-hit' + (followForm.member_id === m.id ? ' selected' : '')} onClick={() => pickMember(m, 'follow')}>
+                    <strong>{m.name}</strong>
+                    <span>{[m.member_code, m.phone].filter(Boolean).join(' · ') || 'No ID / phone'}</span>
+                  </button>
+                ))}{!memberMatches.length && <div className="muted sm">No matching members — the name you typed will still be saved.</div>}</div>}
+              </div>
+              <div><label>Phone</label><input type="tel" value={followForm.phone} onChange={e => setFollowForm(f => ({ ...f, phone: e.target.value }))} placeholder="Optional" /></div>
+              <div><label>Category</label><select value={followForm.category} onChange={e => setFollowForm(f => ({ ...f, category: e.target.value }))}>{['Visitor','New Convert','Member','Youth','Family','Other'].map(o => <option key={o}>{o}</option>)}</select></div>
+              <div className="full"><label>Reason</label><input value={followForm.reason} onChange={e => setFollowForm(f => ({ ...f, reason: e.target.value }))} placeholder="Why is this follow-up needed?" required /></div>
+              <div><label>Assigned to</label><input value={followForm.assigned_to} onChange={e => setFollowForm(f => ({ ...f, assigned_to: e.target.value }))} placeholder="Who will follow up?" /></div>
+              <div><label>Status</label><select value={followForm.status} onChange={e => setFollowForm(f => ({ ...f, status: e.target.value }))}>{['Open','In Progress','Completed','Closed'].map(o => <option key={o}>{o}</option>)}</select></div>
+              <div className="full"><label>Notes</label><textarea rows={4} value={followForm.notes} onChange={e => setFollowForm(f => ({ ...f, notes: e.target.value }))} placeholder="Outcome notes or next steps…" /></div>
+            </div>
+            <div className="pastor-form-actions">
+              <button type="button" className="secondary" onClick={() => setPanel(null)}>Close</button>
+              <button className="primary" type="submit">Save follow-up</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+
+    {panel === 'prayers' && (
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="pastor-prayer-title" onClick={(e) => { if (e.target === e.currentTarget) setPanel(null); }}>
+        <div className="modalbox pastor-modal pastor-modal-wide">
+          <div className="modalhead">
+            <div>
+              <h2 id="pastor-prayer-title">Active prayer requests</h2>
+              <p className="muted sm" style={{ margin: '4px 0 0' }}>{openPrayers.length} open request{openPrayers.length === 1 ? '' : 's'} · stays on this dashboard</p>
+            </div>
+            <button type="button" className="secondary pastor-close-btn" onClick={() => setPanel(null)} aria-label="Close">✕ Close</button>
+          </div>
+          <div className="tablewrap"><table>
+            <thead><tr><th>Date</th><th>Requester</th><th>Category</th><th>Request</th><th>Status</th></tr></thead>
+            <tbody>
+              {openPrayers.slice(0, 40).map(p => (
+                <tr key={p.id}>
+                  <td>{p.date || String(p.created_at || '').slice(0, 10)}</td>
+                  <td><b>{p.requester || p.person_name || ''}</b></td>
+                  <td>{p.category || ''}</td>
+                  <td>{p.request || ''}</td>
+                  <td>{badge(p.status || 'New')}</td>
+                </tr>
+              ))}
+              {!openPrayers.length && <tr><td colSpan="5" className="empty">No open prayer requests.</td></tr>}
+            </tbody>
+          </table></div>
+          <div className="pastor-form-actions">
+            <button type="button" className="secondary" onClick={() => setPanel(null)}>Close</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <div className="cards">
+      <div className="card"><div className="label">Active members</div><div className="num">{active}</div></div>
+      <div className="card"><div className="label">Open follow-ups</div><div className="num">{openFollow}</div></div>
+      <div className="card"><div className="label">Open pastoral cases</div><div className="num">{openCases}</div></div>
+      <div className="card"><div className="label">Prayer requests</div><div className="num">{openPrayers.length}</div></div>
+      <div className="card"><div className="label">Visitors this month</div><div className="num">{visitors}</div></div>
+      {role === 'pastor' && <>
+        <div className="card"><div className="label">Finance awaiting review</div><div className="num">{pendingFinance}</div></div>
+        <div className="card"><div className="label">Approved income</div><div className="num">{money(lockedIncome)}</div></div>
+        <div className="card"><div className="label">Approved expenditure</div><div className="num">{money(lockedExpense)}</div></div>
+      </>}
+    </div>
+    <div className="grid2">
+      <div className="panel"><h2>Recent attendance trend</h2>{trend.length ? <div className="tablewrap"><table><thead><tr><th>Date</th><th>Present</th></tr></thead><tbody>{trend.map(x => <tr key={x.date}><td>{x.date}</td><td><b>{x.present}</b></td></tr>)}</tbody></table></div> : <div className="empty">No attendance records.</div>}</div>
+      <div className="panel">
+        <h2>Pastoral priorities</h2>
+        <p><b>{openCases}</b> pastoral cases require attention.</p>
+        <p><b>{openFollow}</b> follow-ups are open or in progress.</p>
+        <p><b>{openPrayers.length}</b> prayer requests are active.</p>
+        <p className="muted sm">Use the buttons above to add a case or follow-up, or review prayer requests, without leaving this dashboard.</p>
+        {role === 'pastor' && onNavigate && <div className="toolbar"><button className="secondary" onClick={() => onNavigate('financecenter')}>View finance reports</button><button className="secondary" onClick={() => onNavigate('expenditure')}>View expenditure</button></div>}
+      </div>
+    </div>
   </>;
 }
 
@@ -2282,8 +3933,8 @@ export function MemberGiving() {
   const pending=rows.filter(r=>r.status==='Pending').reduce((a,r)=>a+Number(r.amount||0),0);
   const issueReceipt=(r)=>{
     const receipt=r.receipt_number||`R-${String(r.id).replace(/-/g,'').slice(0,8).toUpperCase()}`;
-    const html=`<html><head><title>Church Receipt ${receipt}</title><style>body{font-family:Arial;padding:35px;max-width:650px;margin:auto}h1{text-align:center}hr{border:0;border-top:1px solid #ddd}.row{display:flex;justify-content:space-between;padding:9px 0}.total{font-size:24px;font-weight:700}</style></head><body><h1>${import.meta.env.VITE_CHURCH_NAME||'Church'}<br><small>Giving Receipt</small></h1><hr><div class="row"><b>Receipt</b><span>${receipt}</span></div><div class="row"><b>Member / donor</b><span>${r.member_name||'Anonymous'}</span></div><div class="row"><b>Fund</b><span>${r.fund||''}</span></div><div class="row"><b>Method</b><span>${r.method||''}${r.provider?' / '+r.provider:''}</span></div><div class="row"><b>Reference</b><span>${r.reference||''}</span></div><hr><div class="row total"><span>Amount</span><span>GH₵ ${Number(r.amount||0).toFixed(2)}</span></div><p>Paid: ${r.paid_at||r.created_at||''}</p><p style="color:#666">Thank you for your contribution.</p><script>window.print()</script></body></html>`;
-    const w=window.open('','_blank','width=760,height=800'); if(w){w.document.write(html);w.document.close();}
+    const html=`<html><head><title>Church Receipt ${esc(receipt)}</title><style>body{font-family:Arial;padding:35px;max-width:650px;margin:auto}h1{text-align:center}hr{border:0;border-top:1px solid #ddd}.row{display:flex;justify-content:space-between;padding:9px 0}.total{font-size:24px;font-weight:700}</style></head><body><h1>${esc(import.meta.env.VITE_CHURCH_NAME||'Church')}<br><small>Giving Receipt</small></h1><hr><div class="row"><b>Receipt</b><span>${esc(receipt)}</span></div><div class="row"><b>Member / donor</b><span>${esc(r.member_name||'Anonymous')}</span></div><div class="row"><b>Fund</b><span>${esc(r.fund||'')}</span></div><div class="row"><b>Method</b><span>${esc(r.method||'')}${esc(r.provider?' / '+r.provider:'')}</span></div><div class="row"><b>Reference</b><span>${esc(r.reference||'')}</span></div><hr><div class="row total"><span>Amount</span><span>GH₵ ${Number(r.amount||0).toFixed(2)}</span></div><p>Paid: ${esc(r.paid_at||r.created_at||'')}</p><p style="color:#666">Thank you for your contribution.</p><script>window.print()</script></body></html>`;
+    const w=window.open('','_blank','width=760,height=800'); if(w){w.opener=null;w.document.write(html);w.document.close();}
   };
   return <>
     <div className="top"><div><h1>Member Giving & Receipts</h1><div className="muted">Track digital giving records and print official receipts.</div></div></div>
@@ -2321,9 +3972,14 @@ export function EngagementAutomation() {
 
 /* ---------------- V13 Finance Reconciliation + Engagement ---------------- */
 export function FinanceReconciliation() {
-  const { data, save } = useData();
   const { role } = useAuth();
   if (!['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
+  return <FinanceReconciliationScreen />;
+}
+
+function FinanceReconciliationScreen() {
+  const { data, save } = useData();
+  const { role } = useAuth();
   const [date,setDate]=useState(today());
   const [method,setMethod]=useState('All');
   const [note,setNote]=useState('');
@@ -2331,9 +3987,9 @@ export function FinanceReconciliation() {
   const giving=(data.giving||[]).filter(r=>String(r.date).slice(0,10)===date);
   const offerings=(data.offering_entries||[]).filter(r=>String(r.date).slice(0,10)===date);
   const digital=rows.reduce((n,r)=>n+Number(r.amount||0),0);
-  const manualGiving=giving.reduce((n,r)=>n+Number(r.amount||0),0);
+  const manualGiving=0;
   const manualOffering=offerings.reduce((n,r)=>n+Number(r.amount||0),0);
-  const total=digital+manualGiving+manualOffering;
+  const total=digital+manualOffering;
   const existing=(data.finance_reconciliations||[]).find(r=>r.date===date && r.method_filter===method);
   const [counted,setCounted]=useState(existing?.counted_amount ?? '');
   useEffect(()=>setCounted(existing?.counted_amount ?? ''),[existing?.id,existing?.counted_amount,date,method]);
@@ -2343,23 +3999,28 @@ export function FinanceReconciliation() {
     alert(Math.abs(difference)<0.01?'Reconciliation saved as balanced.':'Reconciliation saved for review.');
   }
   return <>
-    <div className="top"><div><h1>Finance Reconciliation</h1><div className="muted">Compare recorded income with the amount physically or electronically verified for a selected day.</div></div></div>
+    <div className="top"><div><h1>Finance Reconciliation</h1><div className="muted">Reconcile all income in one view. Manual giving should be recorded under Offerings; digital receipts include Mobile Money, bank and card payments.</div></div></div>
     <div className="panel"><div className="toolbar"><div className="fld"><small>Date</small><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div><div className="fld"><small>Payment method</small><select value={method} onChange={e=>setMethod(e.target.value)}><option>All</option><option>Mobile Money</option><option>Bank</option><option>Card</option><option>Cash</option></select></div></div></div>
-    <div className="cards"><div className="card"><span className="label">Digital receipts</span><strong>{money(digital)}</strong></div><div className="card"><span className="label">Manual giving</span><strong>{money(manualGiving)}</strong></div><div className="card"><span className="label">Offerings</span><strong>{money(manualOffering)}</strong></div><div className="card"><span className="label">System total</span><strong>{money(total)}</strong></div></div>
-    <div className="panel"><h2>Reconcile</h2><div className="formgrid"><div><label>Verified amount (GHS)</label><input type="number" min="0" step="0.01" value={counted} onChange={e=>setCounted(e.target.value)} /></div><div><label>Difference</label><input readOnly value={Number.isFinite(difference)?`GH₵ ${difference.toFixed(2)}`:''} /></div><div className="full"><label>Notes</label><textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Optional reconciliation note" /></div></div><div className="toolbar"><button className="primary" onClick={saveRec}>Save reconciliation</button>{existing&&badge(existing.status)}</div></div>
+    <div className="cards"><div className="card"><span className="label">Income (digital payments)</span><strong>{money(digital)}</strong></div><div className="card"><span className="label">Offering income</span><strong>{money(manualOffering)}</strong></div><div className="card"><span className="label">System total</span><strong>{money(total)}</strong></div></div>
+      <div className="panel"><h2>Reconcile</h2><div className="formgrid"><div><label>Verified amount (GHS)</label><input type="number" min="0" step="0.01" value={counted} onChange={e=>setCounted(e.target.value)} /></div><div><label>Difference</label><input readOnly value={Number.isFinite(difference)?`GH₵ ${difference.toFixed(2)}`:''} /></div><div className="full"><label>Notes</label><textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Optional reconciliation note" /></div></div><div className="toolbar"><button className="primary" onClick={saveRec}>Save reconciliation</button>{existing&&badge(existing.status)}</div></div>
     <div className="panel"><h2>Recorded transactions</h2><div className="tablewrap"><table><thead><tr><th>Source</th><th>Reference</th><th>Member / donor</th><th>Method</th><th>Amount</th></tr></thead><tbody>
       {rows.map(r=><tr key={r.id}><td>Digital receipt</td><td>{r.reference||r.receipt_number||''}</td><td>{r.member_name||'Anonymous'}</td><td>{r.method}</td><td>{money(r.amount)}</td></tr>)}
-      {giving.map(r=><tr key={'g'+r.id}><td>Giving</td><td>{r.reference||''}</td><td>{r.member_name||''}</td><td>{r.method||'Cash'}</td><td>{money(r.amount)}</td></tr>)}
+      
       {offerings.map(r=><tr key={'o'+r.id}><td>Offering</td><td>{r.reference||''}</td><td>{r.person_name||''}</td><td>{r.method||'Cash'}</td><td>{money(r.amount)}</td></tr>)}
-      {!rows.length&&!giving.length&&!offerings.length&&<tr><td colSpan="5" className="empty">No recorded transactions for this date.</td></tr>}
+      {!rows.length&&!offerings.length&&<tr><td colSpan="5" className="empty">No recorded transactions for this date.</td></tr>}
     </tbody></table></div></div>
   </>;
 }
 
 export function AutomationCenter() {
-  const { data, save } = useData();
   const { role } = useAuth();
   if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  return <AutomationCenterScreen />;
+}
+
+function AutomationCenterScreen() {
+  const { data, save } = useData();
+  const { role } = useAuth();
   const [channel,setChannel]=useState('SMS');
   const [runMsg,setRunMsg]=useState('');
   const templates=(data.communication_templates||[]).filter(t=>t.active);
@@ -2606,7 +4267,7 @@ export function DeliveryCenter() {
   };
   if (!allowed) return <div className="panel"><h2>Delivery Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   return <>
-    <div className="top"><div><h1>Delivery Center</h1><div className="muted">Send queued SMS messages through the secure Supabase Edge Function.</div></div><button className="primary" onClick={process} disabled={busy}>{busy?'Processing…':'Process queue now'}</button></div>
+    <div className="top"><div><h1>Delivery Center</h1><div className="muted">Send queued SMS messages through the secure Supabase Edge Function.</div></div><button className="primary" onClick={process} disabled={busy}>{busy?'Processing...':'Process queue now'}</button></div>
     <div className="cards"><div className="card"><div className="label">Queued</div><div className="num">{queued.length}</div></div><div className="card"><div className="label">Sent</div><div className="num">{sent.length}</div></div><div className="card"><div className="label">Failed</div><div className="num">{failed.length}</div></div><div className="card"><div className="label">Total queue</div><div className="num">{queue.length}</div></div></div>
     {msg&&<div className="panel"><p className="muted">{msg}</p></div>}
     <div className="panel"><h2>Provider setup</h2><p className="muted">SMS uses SMSOnlineGH. Keep provider credentials in Supabase Edge Function secrets, never in Vite environment variables.</p><div className="tablewrap"><table><thead><tr><th>Channel</th><th>Secrets</th><th>Notes</th></tr></thead><tbody><tr><td>SMS</td><td><code>SMSONLINEGH_API_KEY</code><br/><code>SMSONLINEGH_SENDER_ID</code></td><td>Sender ID must be approved by your SMS provider.</td></tr></tbody></table></div></div>
@@ -2617,16 +4278,20 @@ export function DeliveryCenter() {
 
 /* ---------------- V15 Church-wide Notification Center ---------------- */
 export function NotificationCenter() {
-  const { data, save } = useData();
   const { role } = useAuth();
   const allowed = ['admin','secretary'];
+  if (!allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  return <NotificationCenterScreen />;
+}
+
+function NotificationCenterScreen() {
+  const { data, save } = useData();
   const [channel,setChannel] = useState('In-app');
   const [audience,setAudience] = useState('All Members');
   const [title,setTitle] = useState('');
   const [message,setMessage] = useState('');
   const [schedule,setSchedule] = useState('');
   const [status,setStatus] = useState('');
-  if (!allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
 
   const members=(data.members||[]).filter(m=>m.status!=='Inactive');
   const targetMembers = useMemo(() => {

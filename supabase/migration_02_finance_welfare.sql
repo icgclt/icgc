@@ -5,8 +5,7 @@
 -- Run ONCE, on your EXISTING project (the one where schema.sql already ran):
 -- Dashboard > SQL Editor > New query > paste this whole file > Run.
 -- Safe to run even if some of these tables already exist — each block only
--- creates what's missing (checked at the top of each "do $$" block below is
--- unnecessary here because every table/policy name here is new).
+-- creates what's missing (every table/policy name here is new).
 -- =====================================================================
 
 -- ---------- offering_entries: detailed weekly offering categories ----------

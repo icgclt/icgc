@@ -1,11 +1,11 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+﻿import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
 import { loadTableCaches, persistCache, deleteCache } from './offlineStore';
 
 export const TABLES = [
   'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
-  'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
-  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'notification_campaigns', 'notification_logs', 'payment_requests', 'payment_webhook_events', 'member_notification_preferences', 'member_group_history', 'abc_class_attendance', 'finance_weekly_reports', 'finance_weekly_cash_counts', 'finance_weekly_momo', 'finance_weekday_collections', 'finance_weekday_cash_counts', 'finance_weekday_momo',
+  'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions', 'expenditures',
+  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'service_plans', 'pastoral_cases', 'event_registrations', 'announcements', 'families', 'children', 'child_checkins', 'department_members', 'group_members', 'group_attendance', 'pledges', 'payment_receipts', 'communication_templates', 'communication_queue', 'finance_reconciliations', 'notification_campaigns', 'notification_logs', 'payment_requests', 'payment_webhook_events', 'member_notification_preferences', 'member_group_history', 'abc_class_attendance', 'finance_weekly_reports', 'finance_weekly_cash_counts', 'finance_weekly_momo', 'finance_weekday_collections', 'finance_weekday_cash_counts', 'finance_weekday_momo', 'cashbook_entries',
 ];
 
 // Offline-first storage: every table is persisted so the phone can reopen with the last
@@ -13,7 +13,7 @@ export const TABLES = [
 const BRANCH_SCOPED_TABLES = new Set();
 
 const SENSITIVE_TABLES = new Set([
-  'giving', 'offering_entries', 'member_contributions', 'welfare_transactions',
+  'giving', 'offering_entries', 'member_contributions', 'welfare_transactions', 'expenditures',
 ]);
 const read = (k, d, storage = localStorage) => { try { const v = storage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const write = (k, v, storage = localStorage) => { try { storage.setItem(k, JSON.stringify(v)); return true; } catch { /* storage full/blocked */ return false; } };
@@ -43,10 +43,13 @@ async function fetchAll(table) {
 // first full download a device only asks for rows changed since its last sync. (Tables not listed here
 // have no such trigger, so they are still downloaded in full each time, as before.)
 const INCREMENTAL_TABLES = new Set([
-  'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
-  'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions',
-  'visitors', 'groups', 'follow_ups', 'prayer_requests', 'service_plans', 'pastoral_cases',
-  'member_notification_preferences',
+'members', 'attendance', 'attendance_headcount', 'giving', 'departments', 'events',
+'welfare_members', 'offering_entries', 'member_contributions', 'welfare_transactions', 'expenditures',
+'cashbook_entries',
+'visitors', 'groups', 'follow_ups', 'prayer_requests', 'service_plans', 'pastoral_cases',
+'member_notification_preferences',
+'finance_weekly_reports', 'finance_weekly_cash_counts', 'finance_weekly_momo',
+'finance_weekday_collections', 'finance_weekday_cash_counts', 'finance_weekday_momo',
 ]);
 const OVERLAP_MS = 5 * 60 * 1000;        // re-ask for the last 5 minutes so a slow commit is never missed
 const RECONCILE_MS = 60 * 60 * 1000;     // deleted rows are noticed by an ids-only check at most once an hour
@@ -284,6 +287,7 @@ function DataProviderInner({ uid, role, initial, children }) {
           next[t] = rows;
         }
         if (outboxRef.current.length === 0) {
+          for (const t of ACTIVE_TABLES) { if (!Array.isArray(next[t])) next[t] = []; }
           dataRef.current = next;
           wmRef.current = wm;
           setData(next);
@@ -443,3 +447,4 @@ function DataProviderInner({ uid, role, initial, children }) {
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
+

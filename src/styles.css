@@ -192,3 +192,22 @@ button.danger:disabled { opacity: .55; cursor: not-allowed; }
 
 /* V40: compact Advanced Reports / exports */
 .report-filter-panel{padding:12px;margin-bottom:10px}.report-filter-grid{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px;align-items:end}.report-filter-grid .fld small{font-size:11px}.report-filter-grid input,.report-filter-grid select{padding:8px 9px;font-size:13px}.report-export-card{padding:12px;margin-top:10px}.report-export-head{margin:0 0 8px;align-items:center}.report-export-head h2{margin:0 0 2px;font-size:16px}.report-export-head p{margin:0;font-size:11px}.report-export-card table{font-size:11px}.report-export-card th,.report-export-card td{padding:5px 6px}.report-export-card .primary{padding:7px 10px;font-size:12px;white-space:nowrap}@media(max-width:760px){.report-filter-grid{grid-template-columns:1fr 1fr}.report-filter-grid .fld:last-child{grid-column:1/-1}}@media(max-width:520px){.report-filter-grid{grid-template-columns:1fr}.report-filter-grid .fld:last-child{grid-column:auto}.report-export-head{align-items:flex-start;flex-direction:column}}
+
+
+/* Pastoral dashboard professional modals */
+.pastor-modal{width:min(720px,100%);box-shadow:0 20px 50px #102a4333;border:1px solid #d9e3ec}
+.pastor-modal-wide{width:min(920px,100%)}
+.pastor-modal .modalhead{align-items:flex-start;gap:12px;padding-bottom:12px;border-bottom:1px solid #edf2f7;margin-bottom:16px}
+.pastor-modal .modalhead h2{font-size:20px;color:#183b63}
+.pastor-close-btn{flex:0 0 auto;white-space:nowrap;padding:8px 12px}
+.pastor-form-grid{gap:12px}
+.pastor-form-grid label{font-size:12px;font-weight:600;color:#4a5568;margin-bottom:4px;display:block}
+.pastor-form-grid input,.pastor-form-grid select,.pastor-form-grid textarea{width:100%;box-sizing:border-box}
+.pastor-member-hits{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:160px;overflow:auto;padding:4px 0}
+.pastor-member-hit{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;cursor:pointer;width:100%}
+.pastor-member-hit strong{font-size:13px;color:#1a365d}
+.pastor-member-hit span{font-size:11px;color:#718096}
+.pastor-member-hit:hover{border-color:#90cdf4;background:#ebf8ff}
+.pastor-member-hit.selected{border-color:#3182ce;background:#ebf8ff;box-shadow:0 0 0 1px #3182ce33}
+.pastor-form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid #edf2f7}
+@media(max-width:560px){.pastor-form-actions{flex-direction:column-reverse}.pastor-form-actions button{width:100%}.pastor-modal .modalhead{flex-direction:column}}

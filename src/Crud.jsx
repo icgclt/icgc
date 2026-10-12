@@ -130,11 +130,12 @@ async function compressMemberPhoto(file, maxWidth = 300, maxHeight = 400, qualit
 export default function Crud({
   table, title, noun, fields, columns,
   filters = [], searchKeys = [], sortKey, sortDir = 'asc', sortCompare, defaults = {}, suggest = {}, onSaved, onDeleted, prepareRecord,
+  allowWrite, allowDelete,
 }) {
   const { data, save, remove } = useData();
   const { role } = useAuth();
-  const canWrite = can(role, table, 'write');
-  const canDel = can(role, table, 'del');
+  const canWrite = allowWrite !== undefined ? !!allowWrite : can(role, table, 'write');
+  const canDel = allowDelete !== undefined ? !!allowDelete : can(role, table, 'del');
 
   const [q, setQ] = useState('');
   const [fv, setFv] = useState({});
@@ -172,6 +173,16 @@ export default function Crud({
     fields.forEach((f) => { values[f.key] = row ? row[f.key] ?? '' : defaults[f.key] ?? f.default ?? ''; });
     setForm({ original: row || null, values, errors: {} });
   };
+
+  useEffect(() => {
+    try {
+      const key = `cm:openAdd:${table}`;
+      if (sessionStorage.getItem(key) && canWrite) {
+        sessionStorage.removeItem(key);
+        openForm(null);
+      }
+    } catch { /* ignore */ }
+  }, [table, canWrite]);
 
   const submit = async (e) => {
     e.preventDefault();
