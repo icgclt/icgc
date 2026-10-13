@@ -22,12 +22,12 @@ Deno.serve(async (req) => {
       const { data, error } = await admin.from('payment_requests').select('*').eq('id', requestId).single()
       if (error || !data) return json({ error: 'Payment request not found.' }, 404)
       request = data
-      const allowed = ['admin','finance'].includes(profile?.role) || request.member_id === profile?.member_id
+      const allowed = ['super_admin','admin','finance'].includes(profile?.role) || (!!profile?.member_id && request.member_id === profile.member_id)
       if (!allowed) return json({ error: 'Not authorised for this payment request.' }, 403)
     } else {
       const amount = Number(body.amount)
       const memberId = body.member_id || profile?.member_id || null
-      const allowed = ['admin','finance'].includes(profile?.role) || memberId === profile?.member_id
+      const allowed = ['super_admin','admin','finance'].includes(profile?.role) || (!!profile?.member_id && memberId === profile.member_id)
       if (!allowed || !amount || amount <= 0 || !body.phone || !body.provider || !body.fund) return json({ error: 'Invalid payment details.' }, 400)
       const { data: member } = memberId ? await admin.from('members').select('id,name,email,phone').eq('id', memberId).single() : { data: null }
       const id = crypto.randomUUID()

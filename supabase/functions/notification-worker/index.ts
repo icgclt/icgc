@@ -28,7 +28,7 @@ async function callerAllowed(req: Request) {
   const { data: { user } } = await client.auth.getUser()
   if (!user) return false
   const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).maybeSingle()
-  return ['admin', 'secretary'].includes(profile?.role)
+  return ['super_admin', 'admin', 'secretary'].includes(profile?.role)
 }
 
 async function sendSms(row: any) {
@@ -47,8 +47,8 @@ async function sendSms(row: any) {
 async function processRow(row: any) {
   const result = row.channel === 'SMS' ? await sendSms(row) : null
   if (!result) throw new Error(`Channel ${row.channel} is not enabled. Use SMS.`)
-  await admin.from('communication_queue').update({ status: 'Sent', provider: result.provider, provider_reference: result.reference || null, sent_at: new Date().toISOString(), last_error: null, provider_payload: result.payload, attempts: Number(row.attempts || 0) + 1 }).eq('id', row.id)
-  await admin.from('notification_logs').insert({ id: crypto.randomUUID(), campaign_id: row.campaign_id || null, queue_id: row.id, member_id: row.member_id || null, channel: row.channel, destination: row.phone || row.email || null, status: 'Sent', provider: result.provider, provider_reference: result.reference || null, attempts: Number(row.attempts || 0) + 1, sent_at: new Date().toISOString(), provider_payload: result.payload })
+  await admin.from('communication_queue').update({ status: 'Sent', provider: result.provider, provider_reference: result.reference || null, sent_at: new Date().toISOString(), last_error: null, provider_payload: result.payload, attempts: Number(row.attempts || 0) }).eq('id', row.id)
+  await admin.from('notification_logs').insert({ id: crypto.randomUUID(), campaign_id: row.campaign_id || null, queue_id: row.id, member_id: row.member_id || null, channel: row.channel, destination: row.phone || row.email || null, status: 'Sent', provider: result.provider, provider_reference: result.reference || null, attempts: Number(row.attempts || 0), sent_at: new Date().toISOString(), provider_payload: result.payload })
   return { id: row.id, ok: true, provider: result.provider }
 }
 
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const limit = Math.min(Math.max(Number(body?.limit || 25), 1), 100)
     const now = new Date().toISOString()
-    const { data: candidates, error } = await admin.from('communication_queue').select('*').in('status', ['Queued','Failed']).order('scheduled_for', { ascending: true }).limit(Math.min(limit * 2, 200))
+    const { data: candidates, error } = await admin.from('communication_queue').select('*').in('status', ['Queued','Failed']).lt('attempts', MAX_ATTEMPTS).or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`).order('scheduled_for', { ascending: true }).limit(Math.min(limit * 2, 200))
     if (error) return json({ error: error.message }, 500)
     const nowMs = Date.now()
     const rows = (candidates || []).filter((row: any) => {

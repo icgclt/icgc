@@ -54,6 +54,11 @@ Deno.serve(async (req) => {
     const app_metadata = { must_change_password: true }
     let authUserId = member.user_id || null
     if (authUserId) {
+      // Never reset the password or role of a staff login that happens to be linked to this member.
+      const { data: existingProfile } = await admin.from('profiles').select('role').eq('id', authUserId).maybeSingle()
+      if (existingProfile?.role && !['member', 'pending'].includes(existingProfile.role)) {
+        throw new Error('This member already has a staff login (' + existingProfile.role + '). Manage it from the Users screen instead.')
+      }
       const { error } = await admin.auth.admin.updateUserById(authUserId, { email: login_email, email_confirm: true, password: temporary_password, user_metadata, app_metadata })
       if (error) throw error
     } else {
@@ -62,7 +67,8 @@ Deno.serve(async (req) => {
       authUserId = created.user.id
     }
 
-    await admin.from('profiles').upsert({ id: authUserId, full_name: member.name, role: 'member', member_id: member.id }, { onConflict: 'id' })
+    const { error: profileError } = await admin.from('profiles').upsert({ id: authUserId, full_name: member.name, role: 'member', member_id: member.id }, { onConflict: 'id' })
+    if (profileError) throw profileError
     const { error: linkError } = await admin.from('members').update({ user_id: authUserId, portal_enabled: true, portal_created_at: new Date().toISOString() }).eq('id', member.id)
     if (linkError) throw linkError
 

@@ -4,6 +4,10 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+// Roles that control or approve money and access. Only a Super Admin may grant, remove, reset or delete them.
+const SENSITIVE_ROLES = ['super_admin', 'pastor', 'finance_reviewer'];
+const SENSITIVE_MSG = 'Only a Super Admin can manage Super Admin, Pastor and Finance Reviewer accounts.';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -73,6 +77,7 @@ Deno.serve(async (req) => {
 
       const { data: roleDef, error: roleErr } = await admin.from('role_catalog').select('role_key').eq('role_key', role).maybeSingle();
       if (roleErr || !roleDef || role === 'pending') return json({ error: 'Invalid role.' }, 400);
+      if (SENSITIVE_ROLES.includes(role) && me.role !== 'super_admin') return json({ error: SENSITIVE_MSG }, 403);
 
       // Prevent duplicate Auth accounts for this phone/login alias.
       const { data: users, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -115,6 +120,10 @@ Deno.serve(async (req) => {
       const password = String(body.password || '');
       if (!userId) return json({ error: 'user_id is required.' }, 400);
       if (password.length < 6) return json({ error: 'Password must be at least 6 characters.' }, 400);
+      if (userId !== user.id) {
+        const { data: target } = await admin.from('profiles').select('role').eq('id', userId).maybeSingle();
+        if (SENSITIVE_ROLES.includes(target?.role) && me.role !== 'super_admin') return json({ error: SENSITIVE_MSG }, 403);
+      }
       const { error } = await admin.auth.admin.updateUserById(userId, { password });
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });
@@ -124,6 +133,8 @@ Deno.serve(async (req) => {
       const userId = String(body.user_id || '');
       if (!userId) return json({ error: 'user_id is required.' }, 400);
       if (userId === user.id) return json({ error: 'You cannot delete your own account.' }, 400);
+      const { data: target } = await admin.from('profiles').select('role').eq('id', userId).maybeSingle();
+      if (SENSITIVE_ROLES.includes(target?.role) && me.role !== 'super_admin') return json({ error: SENSITIVE_MSG }, 403);
       const { error } = await admin.auth.admin.deleteUser(userId);
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });
@@ -138,7 +149,7 @@ Deno.serve(async (req) => {
       if (!roleDef || role === 'pending') return json({ error: 'Invalid role.' }, 400);
       const { data: target } = await admin.from('profiles').select('role').eq('id', targetId).maybeSingle();
       if (!target) return json({ error: 'User not found.' }, 404);
-      if ((role === 'super_admin' || target.role === 'super_admin') && me.role !== 'super_admin') return json({ error: 'Only a Super Admin can do this.' }, 403);
+      if ((SENSITIVE_ROLES.includes(role) || SENSITIVE_ROLES.includes(target.role)) && me.role !== 'super_admin') return json({ error: SENSITIVE_MSG }, 403);
       const { data: updated, error } = await caller.from('profiles').update({ role }).eq('id', targetId).select('id');
       if (error) return json({ error: error.message }, 400);
       if (!updated?.length) return json({ error: 'The role was not changed (permission denied).' }, 403);
