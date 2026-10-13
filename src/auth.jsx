@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
 
 export function normalizePhone(value) {
@@ -128,6 +128,39 @@ async function readOfflineCredential(identifier, password) {
   }
 }
 
+// Fast start-up helpers ---------------------------------------------------------------------------------------
+// Supabase will not hand back the saved login until it has tried to refresh an expired token, and with no
+// internet that attempt retries for about 30 seconds. Every data request waits behind it too. So the app
+// never waits for it: it opens from the copy of the login, profile and permissions saved on this device,
+// and lets Supabase catch up in the background.
+const withTimeout = (promise, ms) => new Promise((resolve, reject) => {
+  const t = setTimeout(() => reject(new Error('Request timed out')), ms);
+  promise.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+});
+
+function hasOfflineCredential(identifier) {
+  try { return !!localStorage.getItem(OFFLINE_AUTH_PREFIX + normalizeLoginIdentifier(identifier)); } catch { return false; }
+}
+
+// The signed-in session Supabase keeps in local storage, plus this user's saved profile and permissions.
+// Returns null unless all three are on this device, in which case the normal start-up is used.
+function readCachedBoot() {
+  try {
+    let stored = null;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && /^sb-.+-auth-token$/.test(k)) { stored = JSON.parse(localStorage.getItem(k) || 'null'); break; }
+    }
+    stored = stored?.currentSession || stored;
+    const user = stored?.user;
+    if (!user?.id) return null;
+    const profile = JSON.parse(localStorage.getItem(`cm:profile:${user.id}`) || 'null');
+    const perms = JSON.parse(localStorage.getItem(`cm:permissions:${user.id}`) || 'null');
+    if (!profile || !Array.isArray(perms)) return null;
+    return { session: { ...stored, offline: true }, profile, perms };
+  } catch { return null; }
+}
+
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -135,26 +168,35 @@ export function AuthProvider({ children }) {
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [recovery, setRecovery] = useState(false);
+  const cachedBootRef = useRef(false);
 
   const loadPermissions = useCallback(async (user) => {
     if (!user) { setPermissions([]); setPermissionsLoading(false); return []; }
     setPermissionsLoading(true);
+    const pk = `cm:permissions:${user.id}`;
+    // A failed read must never empty the menu: keep the list saved on this device.
+    const saved = () => {
+      try { const c = JSON.parse(localStorage.getItem(pk) || '[]'); return Array.isArray(c) ? c : []; } catch { return []; }
+    };
+    const keep = () => { const c = saved(); setPermissions(c); return c; };
+    const done = (list) => {
+      setPermissions(list);
+      try { localStorage.setItem(pk, JSON.stringify(list)); } catch { /* ignore */ }
+      return list;
+    };
     try {
       const { data: profileData, error: profileError } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-      if (profileError) { setPermissions([]); return []; }
+      if (profileError) return keep();
       const userRole = profileData?.role;
       if (userRole === 'super_admin') {
         const { data: allPermissions, error: allError } = await supabase.from('app_permissions').select('permission_key');
-        const list = !allError ? (allPermissions || []).map((p) => p.permission_key).filter(Boolean) : [];
-        setPermissions(list);
-        return list;
+        if (allError) return keep();
+        return done((allPermissions || []).map((p) => p.permission_key).filter(Boolean));
       }
       if (!userRole) { setPermissions([]); return []; }
       const { data, error } = await supabase.from('role_permissions').select(`enabled, app_permissions ( permission_key )`).eq('role', userRole).eq('enabled', true);
-      if (error) { setPermissions([]); return []; }
-      const list = (data || []).map((row) => row.app_permissions?.permission_key).filter(Boolean);
-      setPermissions(list);
-      return list;
+      if (error) return keep();
+      return done((data || []).map((row) => row.app_permissions?.permission_key).filter(Boolean));
     } finally { setPermissionsLoading(false); }
   }, []);
 
@@ -176,21 +218,128 @@ export function AuthProvider({ children }) {
     return [];
   }, [loadPermissions]);
 
+  // Email links (password reset, invitations) return the session in the address bar. Once Supabase has read it,
+  // remove it, so the token is not left in the browser history, bookmarks or screenshots.
+  const scrubAuthHash = () => {
+    try {
+      if (/access_token=|refresh_token=|type=(recovery|signup|invite|magiclink)|error_description=/.test(window.location.hash)) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    } catch { /* ignore */ }
+  };
+
+  // Pick up Role Permission changes without a sign-out: refresh when the app becomes visible again.
+  // This only ever replaces the list after a successful read, so a poor connection can never empty the menu.
+  const refreshPermissionsQuietly = useCallback(async (user) => {
+    try {
+      const { data: p, error: pe } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+      if (pe || !p?.role) return;
+      let list;
+      if (p.role === 'super_admin') {
+        const { data, error } = await supabase.from('app_permissions').select('permission_key');
+        if (error) return;
+        list = (data || []).map((x) => x.permission_key).filter(Boolean);
+      } else {
+        const { data, error } = await supabase.from('role_permissions').select('enabled, app_permissions ( permission_key )').eq('role', p.role).eq('enabled', true);
+        if (error) return;
+        list = (data || []).map((r) => r.app_permissions?.permission_key).filter(Boolean);
+      }
+      setPermissions((prev) => (prev.length === list.length && prev.every((k) => list.includes(k))) ? prev : list);
+      try { localStorage.setItem(`cm:permissions:${user.id}`, JSON.stringify(list)); } catch { /* ignore */ }
+    } catch { /* keep the permissions we already have */ }
+  }, []);
+
+  // Quietly bring the profile and permissions up to date once we are really online. Only a successful read
+  // replaces what is on screen, so a poor connection can never empty the menu or log anyone out.
+  const reconcileQuietly = useCallback(async (user) => {
+    if (!user || !navigator.onLine) return;
+    try {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+      if (!error && data) {
+        setProfile(data);
+        try { localStorage.setItem(`cm:profile:${user.id}`, JSON.stringify(data)); } catch { /* ignore */ }
+      }
+    } catch { /* keep the saved profile */ }
+    await refreshPermissionsQuietly(user);
+  }, [refreshPermissionsQuietly]);
+
   useEffect(() => {
     let alive = true;
-    supabase.auth.getSession().then(async ({ data }) => {
+    let booted = false;
+
+    // Open the app from the copy saved on this device.
+    const bootFromCache = () => {
+      const c = readCachedBoot();
+      if (!c) return false;
+      cachedBootRef.current = true;
+      setSession(c.session);
+      setProfile(c.profile);
+      setPermissions(c.perms);
+      setLoading(false);
+      return true;
+    };
+
+    // Supabase has finished reading the saved login (this can take ~30 s with no internet).
+    const handleReal = async ({ data }) => {
       if (!alive) return;
-      setSession(data.session);
-      await loadProfile(data.session?.user);
-      if (alive) setLoading(false);
-    }).catch(() => { if (alive) setLoading(false); });
+      scrubAuthHash();
+      if (data?.session) {
+        cachedBootRef.current = false;
+        setSession(data.session);
+        if (booted) await reconcileQuietly(data.session.user);
+        else await loadProfile(data.session.user);
+      } else if (!booted) {
+        setSession(null);
+        await loadProfile(null);
+      }
+      // If we opened from the saved copy and Supabase has nothing, that is a failed refresh, not a sign-out.
+      // A real sign-out (revoked login) arrives as a SIGNED_OUT event below.
+    };
+
+    // No internet: open immediately, no waiting at all.
+    if (!navigator.onLine) booted = bootFromCache();
+    const real = supabase.auth.getSession();
+
+    if (booted) {
+      real.then(handleReal).catch(() => {});
+    } else {
+      (async () => {
+        try {
+          const TIMED_OUT = Symbol('timed-out');
+          const first = await Promise.race([real, new Promise((r) => setTimeout(() => r(TIMED_OUT), 3000))]);
+          if (!alive) return;
+          if (first === TIMED_OUT) {
+            // Online but Supabase is slow (weak signal, or the connection is dead): use the saved copy now.
+            if (bootFromCache()) { booted = true; real.then(handleReal).catch(() => {}); return; }
+            await handleReal(await real);
+          } else {
+            await handleReal(first);
+          }
+        } catch { /* fall through to the sign-in screen */ }
+        if (alive) setLoading(false);
+      })();
+    }
+
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       if (event === 'PASSWORD_RECOVERY') setRecovery(true);
+      scrubAuthHash();
+      // A failed refresh with no internet reports "no session". That must not sign out a device we opened from its saved copy.
+      if (!s && event !== 'SIGNED_OUT' && cachedBootRef.current) return;
+      if (s) cachedBootRef.current = false;
       setSession(s);
       setTimeout(() => loadProfile(s?.user), 0);
     });
     return () => { alive = false; sub.subscription.unsubscribe(); };
-  }, [loadProfile]);
+  }, [loadProfile, reconcileQuietly]);
+
+  useEffect(() => {
+    const user = session?.user;
+    if (!user || session?.offline) return undefined;
+    const refresh = () => { if (document.visibilityState === 'visible' && navigator.onLine) refreshPermissionsQuietly(user); };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => { document.removeEventListener('visibilitychange', refresh); window.removeEventListener('focus', refresh); };
+  }, [session, refreshPermissionsQuietly]);
 
   const signIn = async (identifier, password) => {
     const v = String(identifier || '').trim();
@@ -208,7 +357,9 @@ export function AuthProvider({ children }) {
 
     let result;
     try {
-      result = await supabase.auth.signInWithPassword({ email, password });
+      // A phone can say it is online while the connection is dead. Do not wait for the browser's own long timeout:
+      // if this device has a saved sign-in for the account, give the server a few seconds, then use the saved one.
+      result = await withTimeout(supabase.auth.signInWithPassword({ email, password }), hasOfflineCredential(v) ? 6000 : 20000);
     } catch (e) {
       const message = String(e?.message || e || '');
       const networkFailure = /failed to fetch|networkerror|network request failed|fetch failed|load failed|timeout|timed out/i.test(message);
@@ -261,7 +412,17 @@ export function AuthProvider({ children }) {
     loading, recovery,
     signIn,
     signUp: (email, password, fullName) => supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } }),
-    signOut: () => { setSession(null); setProfile(null); setPermissions([]); return supabase.auth.signOut(); },
+    signOut: async () => {
+      cachedBootRef.current = false;
+      setSession(null); setProfile(null); setPermissions([]);
+      // Offline (or a dead connection) the server cannot be told, so also remove the login saved on this device.
+      // Otherwise the app would reopen already signed in next time.
+      if (!navigator.onLine) return supabase.auth.signOut({ scope: 'local' });
+      let res;
+      try { res = await withTimeout(supabase.auth.signOut(), 4000); } catch (e) { res = { error: e }; }
+      if (res?.error) { try { await supabase.auth.signOut({ scope: 'local' }); } catch { /* ignore */ } }
+      return res;
+    },
     sendResetEmail: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
     updatePassword: async (password) => {
       const res = await supabase.auth.updateUser({ password });

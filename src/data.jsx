@@ -1,4 +1,4 @@
-﻿import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
 import { loadTableCaches, persistCache, deleteCache } from './offlineStore';
 
@@ -10,7 +10,6 @@ export const TABLES = [
 
 // Offline-first storage: every table is persisted so the phone can reopen with the last
 // known data immediately. The app still syncs with Supabase when connectivity returns.
-const BRANCH_SCOPED_TABLES = new Set();
 
 const SENSITIVE_TABLES = new Set([
   'giving', 'offering_entries', 'member_contributions', 'welfare_transactions', 'expenditures',
@@ -155,14 +154,22 @@ function DataProviderInner({ uid, role, initial, children }) {
 
   const [data, setData] = useState(initial); 
   const dataRef = useRef(data);
-  const initialPersistentOutbox = read(okey, []);
-  const legacySensitive = initialPersistentOutbox.filter((op) => SENSITIVE_TABLES.has(op.table));
-  if (legacySensitive.length) {
-    write(skey, legacySensitive, sensitiveStorage);
-    write(okey, initialPersistentOutbox.filter((op) => !SENSITIVE_TABLES.has(op.table)));
+  // Load the saved offline queues once. Doing this on every render re-read and re-parsed localStorage each time.
+  const bootRef = useRef(null);
+  if (bootRef.current === null) {
+    const persisted = read(okey, []);
+    const legacySensitive = persisted.filter((op) => SENSITIVE_TABLES.has(op.table));
+    if (legacySensitive.length) {
+      write(skey, legacySensitive, sensitiveStorage);
+      write(okey, persisted.filter((op) => !SENSITIVE_TABLES.has(op.table)));
+    }
+    bootRef.current = {
+      outbox: [...read(okey, []), ...read(skey, [], sensitiveStorage)],
+      failed: [...read(fkey, []), ...read(sfkey, [], sensitiveStorage)]
+    };
   }
-  const outboxRef = useRef([...read(okey, []), ...read(skey, [], sensitiveStorage)]);
-  const failedRef = useRef([...read(fkey, []), ...read(sfkey, [], sensitiveStorage)]);
+  const outboxRef = useRef(bootRef.current.outbox);
+  const failedRef = useRef(bootRef.current.failed);
   const [pending, setPending] = useState(outboxRef.current.length);
   const [failed, setFailed] = useState(failedRef.current);
   const [online, setOnline] = useState(navigator.onLine);
@@ -244,7 +251,7 @@ function DataProviderInner({ uid, role, initial, children }) {
           // If the same record was edited more than once while offline, later queued edits
           // should build on this successful server version instead of falsely conflicting.
           outboxRef.current = outboxRef.current.map((queued, index) =>
-            index > 0 && queued.table === op.table && queued.row?.id === op.row.id
+            index > 0 && queued.table === op.table && (queued.row?.id === op.row.id || queued.id === op.row.id)
               ? { ...queued, expectedUpdatedAt: result.data.updated_at }
               : queued
           );
@@ -256,8 +263,10 @@ function DataProviderInner({ uid, role, initial, children }) {
         const next = {};
         const wm = { ...wmRef.current };
         const reconcile = forceReconcile.current || Date.now() - lastReconcile.current > RECONCILE_MS;
+        const failedTables = [];
         for (const t of ACTIVE_TABLES) {
           const cached = before[t] || [];
+          try {
           if (!INCREMENTAL_TABLES.has(t) || !wm[t] || !cached.length) {
             next[t] = await fetchAll(t);
             if (INCREMENTAL_TABLES.has(t)) { const m = maxUpdated(next[t]); if (m) wm[t] = m; else delete wm[t]; }
@@ -285,6 +294,12 @@ function DataProviderInner({ uid, role, initial, children }) {
             if (rows.some((r) => !live.has(r.id))) rows = rows.filter((r) => live.has(r.id));
           }
           next[t] = rows;
+          } catch (e) {
+            // A table that fails (not created yet, permission problem) keeps its saved copy and the rest still sync.
+            failedTables.push(t);
+            next[t] = cached;
+            console.warn(`Sync skipped "${t}":`, e?.message || e);
+          }
         }
         if (outboxRef.current.length === 0) {
           for (const t of ACTIVE_TABLES) { if (!Array.isArray(next[t])) next[t] = []; }
@@ -301,7 +316,7 @@ function DataProviderInner({ uid, role, initial, children }) {
             const saved = await persistCache(ck(t), dataRef.current[t]);
             if (INCREMENTAL_TABLES.has(t)) { if (saved && wm[t]) write(wmk(t), wm[t]); else removeStored(wmk(t)); }
           }
-          setSyncError(false);
+          setSyncError(failedTables.length > 0);
         }
       } else if (outboxRef.current.length === 0) {
         setSyncError(false);
@@ -405,8 +420,8 @@ function DataProviderInner({ uid, role, initial, children }) {
   };
 
   const remove = (table, id) => {
-    const existing = dataRef.current[table].find((x) => x.id === id);
-    commit(table, dataRef.current[table].filter((x) => x.id !== id));
+    const existing = (dataRef.current[table] || []).find((x) => x.id === id);
+    commit(table, (dataRef.current[table] || []).filter((x) => x.id !== id));
     setOutbox([...outboxRef.current, { op: 'delete', table, id, expectedUpdatedAt: existing?.updated_at || null }]);
     syncRef.current(false);
   };

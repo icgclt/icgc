@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { configured, supabase } from './supabase';
-import { AuthProvider, useAuth, can, ROLES } from './auth';
+import { AuthProvider, useAuth, ROLES } from './auth';
 import { DataProvider, useData } from './data';
 import {
-  Dashboard, Members, Attendance, AbsenteeList, HeadcountAttendance, Offerings, EventAttendance, ServiceTimer, ServiceTimerLive,
-  FirstFruit, Departments, Events, Users, Settings, SendSMS,
-  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, MemberGiving, EngagementAutomation, FinanceReconciliation, AdvancedReports, NotificationCenter, MobileMoneyPayments, DeliveryCenter, MemberLookup, FinanceCenter, Expenditure, Cashbook, AutomationCenter,
+  Dashboard, Members, Attendance, AbsenteeList, HeadcountAttendance, ServiceTimer, ServiceTimerLive,
+  Departments, Events, Users, Settings, SendSMS,
+  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, EngagementAutomation, FinanceReconciliation, AdvancedReports, NotificationCenter, DeliveryCenter, MemberLookup, FinanceCenter, Expenditure, Cashbook, AutomationCenter,
 } from './pages';
 import { DepartmentDashboard } from './operational';
 import { formatLoginId } from './utils';
@@ -187,7 +187,7 @@ const NAV = [
   ] },
   { group: 'finance', label: '💰 Finance', items: [
     ['financecenter', 'Finance Center', FinanceCenter, 'finance.view'],
-    ['expenditure', 'Expenditure', Expenditure, 'finance.view'],
+    ['expenditure', 'Expenditure', Expenditure, 'expenditure.view'],
     ['cashbook', 'Cashbook', Cashbook, 'finance.view'],
     ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'finance_reconciliation.view'],
   ] },
@@ -206,7 +206,7 @@ const NAV = [
   ['automationcenter', '⚙️ Automation Center', AutomationCenter, 'notifications.manage'],
   ['advancedreports', '📊 Advanced Reports', AdvancedReports, 'advanced_reports.view'],
   ['pastordashboard', '🩺 Pastoral Dashboard', PastorDashboard, 'pastoral_cases.view'],
-  ['sms', '💬 Send SMS', SendSMS, 'notifications.manage'],
+  ['sms', '💬 Send SMS', SendSMS, 'sms.send'],
   ['users', '🔑 Users', Users, 'users.view'],
   ['audit', '🧾 Audit Log', AuditLog, 'audit.view'],
   ['settings', '⚙ Settings', Settings, 'settings.view'],
@@ -261,8 +261,11 @@ const CURRENT_PERMISSION_CATALOG = [
   ['pastoral_cases.manage','pastoral_care','manage','Manage Pastoral Care','Create, edit and manage pastoral care cases'],
   ['notifications.view','notifications','view','View Notifications','View notification tools'],
   ['notifications.manage','notifications','manage','Manage Notifications','Manage church notifications'],
+  ['sms.send','sms','send','Send SMS','Send SMS messages to members. Tick this for the Pastor or any other role that should be allowed to send SMS.'],
   ['finance.view','finance','view','View Finance','Access Finance Center and financial records'],
   ['finance.manage','finance','manage','Manage Finance','Create, edit and manage Finance Center records'],
+  ['expenditure.view','expenditure','view','View Expenditure','View expenditure records and payment vouchers'],
+  ['expenditure.manage','expenditure','manage','Manage Expenditure','Prepare, edit, delete and submit draft expenditure. Approval is a separate permission.'],
   ['finance_reviewer.approve','finance_reviewer','approve','Review & Approve Financial Records','Review submitted reports and expenditure; approve, return or reject records. This does not authorize reopening locked records.'],
   ['finance_reconciliation.view','finance_reconciliation','view','View Reconciliation','Access financial reconciliation'],
   ['finance_reconciliation.manage','finance_reconciliation','manage','Manage Reconciliation','Perform financial checking and reconciliation'],
@@ -290,15 +293,16 @@ function PermissionManager() {
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleBase, setNewRoleBase] = useState('viewer');
   const [creatingRole, setCreatingRole] = useState(false);
-  const [selectedRole, setSelectedRole] = useState('admin');
+  const [selectedRole, setSelectedRole] = useState(() => { try { return localStorage.getItem('cm:permRole') || 'admin'; } catch { return 'admin'; } });
+  useEffect(() => { try { localStorage.setItem('cm:permRole', selectedRole); } catch { /* ignore */ } }, [selectedRole]);
   const [enabled, setEnabled] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
-  const load = async () => {
-    setLoading(true); setMsg(''); setError('');
+  const load = async (keepMsg = false) => {
+    setLoading(true); if (!keepMsg) setMsg(''); setError('');
     try {
       const { data: roleRows, error: roleError } = await supabase.from('role_catalog').select('role_key,label,base_role,is_system').order('is_system',{ascending:false}).order('label');
       if (roleError) throw roleError;
@@ -334,8 +338,8 @@ function PermissionManager() {
 
   useEffect(() => { if (role === 'super_admin' && hasPermission('permissions.view')) load(); }, [role, selectedRole]);
 
-  const MODULE_ORDER = ['dashboard','members','attendance','children','child_checkins','groups','departments','events','visitors','follow_ups','prayer_requests','pastoral_care','notifications','finance','finance_reviewer','finance_reconciliation','welfare','service_plans','advanced_reports','audit','users','permissions','settings','backup','clear_test_data'];
-  const LABELS = { dashboard:'Dashboard',members:'Members',attendance:'Attendance',children:'Children','child_checkins':'Children Check-in / Pickup',groups:'Groups',departments:'Departments',events:'Events',visitors:'Visitors',follow_ups:'Follow-ups',prayer_requests:'Prayer Requests',pastoral_care:'Pastoral Care',notifications:'Notifications',finance:'Finance',finance_reviewer:'Finance Reviewer',finance_reconciliation:'Finance Reconciliation',welfare:'Welfare',service_plans:'Service Plans',advanced_reports:'Advanced Reports',audit:'Audit Log',users:'User Management',permissions:'Permissions',settings:'System Settings',backup:'Backup',clear_test_data:'Clear Test Data' };
+  const MODULE_ORDER = ['dashboard','members','attendance','children','child_checkins','groups','departments','events','visitors','follow_ups','prayer_requests','pastoral_care','notifications','sms','finance','expenditure','finance_reviewer','finance_reconciliation','welfare','service_plans','advanced_reports','audit','users','permissions','settings','backup','clear_test_data'];
+  const LABELS = { dashboard:'Dashboard',members:'Members',attendance:'Attendance',children:'Children','child_checkins':'Children Check-in / Pickup',groups:'Groups',departments:'Departments',events:'Events',visitors:'Visitors',follow_ups:'Follow-ups',prayer_requests:'Prayer Requests',pastoral_care:'Pastoral Care',notifications:'Notifications',sms:'Send SMS',finance:'Finance',expenditure:'Expenditure',finance_reviewer:'Finance Reviewer',finance_reconciliation:'Finance Reconciliation',welfare:'Welfare',service_plans:'Service Plans',advanced_reports:'Advanced Reports',audit:'Audit Log',users:'User Management',permissions:'Permissions',settings:'System Settings',backup:'Backup',clear_test_data:'Clear Test Data' };
   const grouped = useMemo(() => {
     const out = {}; permissions.forEach(p => { if (!out[p.module]) out[p.module]=[]; out[p.module].push(p); });
     return Object.fromEntries(MODULE_ORDER.filter(m=>out[m]?.length).map(m=>[m,out[m]]));
@@ -357,7 +361,14 @@ function PermissionManager() {
       if (defsError) throw defsError;
       const updates = (defs || []).map(p => supabase.from('role_permissions').upsert({role:selectedRole,permission_id:p.id,enabled:!!enabled[p.permission_key]},{onConflict:'role,permission_id'}));
       const results = await Promise.all(updates); const failed=results.find(r=>r.error); if(failed?.error) throw failed.error;
-      setMsg(`Permissions for ${selectedRole.replace('_',' ')} saved successfully.`); await load();
+      // Read the rows back so a silent refusal by the database is reported instead of looking like a success.
+      const { data: back, error: backError } = await supabase.from('role_permissions').select('permission_id, enabled').eq('role', selectedRole);
+      if (backError) throw backError;
+      const saved = new Map((back || []).map(r => [r.permission_id, !!r.enabled]));
+      const notSaved = (defs || []).filter(p => saved.get(p.id) !== !!enabled[p.permission_key]);
+      if (notSaved.length) throw new Error(`${notSaved.length} permission(s) were not saved by the database. Check that you are signed in as Super Admin and try again.`);
+      await load(true);
+      setMsg(`Permissions for ${selectedRole.replace('_',' ')} saved. Users in this group get the change the next time they sign in or reopen the app.`);
     } catch (e) { setError(e?.message || String(e)); } finally { setSaving(false); }
   };
 
@@ -365,7 +376,7 @@ function PermissionManager() {
     const label = newRoleName.trim();
     if (!label) return setError('Enter a role name.');
     const key = label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-    if (!key || ['super_admin','admin','finance','finance_reviewer','secretary','viewer','member','pending'].includes(key)) return setError('Choose a different role name.');
+    if (!key || ['super_admin','admin','finance','finance_reviewer','pastor','secretary','viewer','member','sunday_school_teacher','pending'].includes(key)) return setError('Choose a different role name.');
     setCreatingRole(true); setError(''); setMsg('');
     try {
       const { error } = await supabase.from('role_catalog').insert({role_key:key,label,base_role:newRoleBase,is_system:false});

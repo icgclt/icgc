@@ -102,7 +102,7 @@ export function toCSV(rows) {
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((k) => !HIDDEN.includes(k));
   const cell = (v) => {
     let s = String(v ?? '');
-    if (/^[=+\-@]/.test(s)) s = "'" + s; // stop Excel treating text as a formula
+    if (/^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(\.\d+)?$/.test(s)) s = "'" + s; // stop Excel treating text as a formula
     return `"${s.replace(/"/g, '""')}"`;
   };
   return [keys.join(','), ...rows.map((r) => keys.map((k) => cell(r[k])).join(','))].join('\r\n');

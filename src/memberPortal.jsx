@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from './auth';
 import { useData } from './data';
 import { supabase } from './supabase';
-import { upcomingEvents, formatLoginId } from './utils';
+import { upcomingEvents, formatLoginId, escapeHtml as esc } from './utils';
 
 const money = (n) => `GH₵ ${Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const dateText = (v) => v ? new Date(v).toLocaleDateString() : '';
@@ -10,8 +10,33 @@ const dateText = (v) => v ? new Date(v).toLocaleDateString() : '';
 function printReceipt(r) {
   const w = window.open('', '_blank', 'width=700,height=800');
   if (!w) return;
-  w.document.write(`<!doctype html><html><head><title>${r.receipt_number || 'Receipt'}</title><style>body{font-family:Arial,sans-serif;padding:40px;max-width:620px;margin:auto}h1{margin-bottom:4px}.muted{color:#666}.line{border-top:1px solid #ddd;margin:20px 0}.row{display:flex;justify-content:space-between;padding:8px 0}</style></head><body><h1>Church Payment Receipt</h1><div class="muted">Receipt: ${r.receipt_number || ''}</div><div class="line"></div><div class="row"><b>Member</b><span>${r.member_name || ''}</span></div><div class="row"><b>Fund</b><span>${r.fund || ''}</span></div><div class="row"><b>Amount</b><span>${money(r.amount)}</span></div><div class="row"><b>Method</b><span>${r.method || ''}</span></div><div class="row"><b>Reference</b><span>${r.reference || ''}</span></div><div class="row"><b>Paid</b><span>${dateText(r.paid_at || r.created_at)}</span></div><div class="line"></div><p class="muted">Thank you for your contribution.</p><script>window.print();</script></body></html>`);
+  w.opener = null; // the receipt window gets no access back to the app
+  w.document.write(`<!doctype html><html><head><title>${esc(r.receipt_number || 'Receipt')}</title><style>body{font-family:Arial,sans-serif;padding:40px;max-width:620px;margin:auto}h1{margin-bottom:4px}.muted{color:#666}.line{border-top:1px solid #ddd;margin:20px 0}.row{display:flex;justify-content:space-between;padding:8px 0}</style></head><body><h1>Church Payment Receipt</h1><div class="muted">Receipt: ${esc(r.receipt_number || '')}</div><div class="line"></div><div class="row"><b>Member</b><span>${esc(r.member_name || '')}</span></div><div class="row"><b>Fund</b><span>${esc(r.fund || '')}</span></div><div class="row"><b>Amount</b><span>${esc(money(r.amount))}</span></div><div class="row"><b>Method</b><span>${esc(r.method || '')}</span></div><div class="row"><b>Reference</b><span>${esc(r.reference || '')}</span></div><div class="row"><b>Paid</b><span>${esc(dateText(r.paid_at || r.created_at))}</span></div><div class="line"></div><p class="muted">Thank you for your contribution.</p><script>window.print();</script></body></html>`);
   w.document.close();
+}
+
+// Members only see "My Church", so the password form lives here (it is also in Settings for staff).
+function MemberPasswordForm() {
+  const { updatePassword } = useAuth();
+  const [p1, setP1] = useState('');
+  const [p2, setP2] = useState('');
+  const [msg, setMsg] = useState(null);
+  async function submit(e) {
+    e.preventDefault();
+    if (p1.length < 6) return setMsg({ bad: true, t: 'Password must be at least 6 characters.' });
+    if (p1 !== p2) return setMsg({ bad: true, t: 'The two passwords do not match.' });
+    const { error } = await updatePassword(p1);
+    if (error) setMsg({ bad: true, t: error.message });
+    else { setMsg({ t: 'Password changed.' }); setP1(''); setP2(''); }
+  }
+  return (
+    <form onSubmit={submit} style={{ maxWidth: 360 }}>
+      <label>New password</label><input type="password" value={p1} onChange={(e) => setP1(e.target.value)} autoComplete="new-password" style={{ width: '100%', marginBottom: 10 }} />
+      <label>Confirm new password</label><input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" style={{ width: '100%', marginBottom: 10 }} />
+      {msg && <div className={msg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{msg.t}</div>}
+      <button className="primary">Update password</button>
+    </form>
+  );
 }
 
 export default function MemberPortal() {
@@ -107,7 +132,7 @@ export default function MemberPortal() {
   return <div>
     <div className="top"><div><h1>My Church</h1><p className="muted">Welcome, {member?.name || profile?.full_name || formatLoginId(user?.email)}.</p></div></div>
     {!member && <div className="panel"><h2>Profile linking needed</h2><p className="muted">Your login is not linked to a member record yet. Ask a church administrator to connect your account to your member profile.</p></div>}
-    <div className="tabs">{['home','profile','attendance','giving','receipts','pay','events','prayer','notifications'].map(x=><button key={x} className={tab===x?'tab active':'tab'} onClick={()=>setTab(x)}>{x[0].toUpperCase()+x.slice(1)}</button>)}</div>
+    <div className="tabs">{['home','profile','attendance','giving','receipts','pay','events','prayer','notifications','account'].map(x=><button key={x} className={tab===x?'tab active':'tab'} onClick={()=>setTab(x)}>{x[0].toUpperCase()+x.slice(1)}</button>)}</div>
     {tab==='home' && <>
       <div className="cards"><div className="card"><div className="muted">Attendance</div><strong>{attendanceSummary.percent}%</strong><div className="muted sm">{attendanceSummary.daysPresent} of {attendanceSummary.attendanceDays} attendance days</div></div><div className="card"><div className="muted">Attendance records</div><strong>{myAttendance.length}</strong></div><div className="card"><div className="muted">My giving</div><strong>{money(totalGiving)}</strong></div><div className="card"><div className="muted">Next event</div><strong style={{fontSize:16}}>{events[0]?.title || 'None scheduled'}</strong><div className="muted sm">{events[0] ? `${events[0].date}${events[0].event_time ? ` · ${events[0].event_time}` : ''}` : ''}</div></div></div>
       <div className="panel"><h2>Upcoming church events</h2>{events.length ? events.slice(0,5).map(e=><div className="listrow" key={e.id}><b>{e.title}</b><div>{e.date}{e.event_time ? ` · ${e.event_time}` : ''}{e.location ? ` · ${e.location}` : ''}</div></div>) : <p className="muted">No upcoming events.</p>}</div><div className="panel"><h2>Quick actions</h2><div className="toolbar"><button className="primary" onClick={()=>setTab('profile')}>Update my profile</button><button className="secondary" onClick={()=>setTab('pay')}>Give by Mobile Money</button><button className="secondary" onClick={()=>setTab('events')}>View upcoming events</button><button className="secondary" onClick={()=>setTab('prayer')}>Send prayer request</button></div></div>
@@ -121,5 +146,6 @@ export default function MemberPortal() {
     {tab==='events' && <div className="panel"><h2>Upcoming events</h2>{events.map(e=><div className="listrow" key={e.id}><b>{e.title}</b><div>{e.date} {e.event_time||''} {e.location?`• ${e.location}`:''}</div><div className="muted">{e.description||''}</div></div>)}{!events.length&&<p className="muted">No upcoming events.</p>}</div>}
     {tab==='prayer' && <div><div className="panel"><h2>Prayer request</h2><form onSubmit={submitPrayer}><textarea rows="5" value={request} onChange={e=>setRequest(e.target.value)} placeholder="Write your prayer request..." style={{width:'100%'}} required/><button className="primary" style={{marginTop:10}}>Submit request</button></form>{msg&&<p className="muted">{msg}</p>}</div><div className="panel"><h2>My prayer requests</h2>{myPrayers.map(p=><div className="listrow" key={p.id}><b>{dateText(p.created_at)} · {p.status||'Open'}</b><div>{p.request}</div></div>)}{!myPrayers.length&&<p className="muted">No prayer requests yet.</p>}</div></div>}
     {tab==='notifications' && <div className="panel"><h2>Notification preferences</h2><p className="muted">Choose which church messages you want to receive.</p>{[['sms','SMS'],['email','Email'],['in_app','In-app notifications'],['event_reminders','Event reminders'],['payment_confirmations','Payment confirmations'],['birthday_messages','Birthday messages'],['follow_up_messages','Follow-up messages']].map(([k,label])=><label key={k} style={{display:'block',margin:'12px 0'}}><input type="checkbox" checked={!!prefs[k]} onChange={e=>setPref(k,e.target.checked)} /> {label}</label>)}<button className="primary" onClick={savePrefs}>Save preferences</button>{prefMsg&&<p className="muted">{prefMsg}</p>}</div>}
+    {tab==='account' && <div className="panel"><h2>My account</h2><p className="muted">Change the password you use to sign in.</p><MemberPasswordForm /></div>}
   </div>
 }

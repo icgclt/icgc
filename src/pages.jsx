@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
-import { useData, TABLES } from './data';
+import { useData } from './data';
 import { supabase } from './supabase';
 import Crud, { StoragePhoto } from './Crud';
 import { money, today, downloadCSV, download, parseCSV, uuid, upcomingEvents as pickUpcomingEvents, eventInProgress, escapeHtml as esc, formatLoginId } from './utils';
@@ -169,6 +169,49 @@ export function Dashboard() {
 /* ---------------- Modules (all use the generic Crud component) ---------------- */
 const MEMBER_CSV_FIELDS = ['member_code', 'name', 'phone', 'email', 'dob', 'gender', 'member_type', 'grp', 'status', 'address', 'parent1_name', 'parent1_phone', 'parent1_relationship', 'parent2_name', 'parent2_phone', 'parent2_relationship', 'notes'];
 
+// ---- Member CSV import helpers ------------------------------------------------------------------
+// Excel often damages phone numbers: it drops the leading 0 (0244123456 becomes 244123456) and turns long
+// numbers into scientific notation (2.43E+08), which loses the digits for good.
+function cleanPhone(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return { phone: '', status: 'blank' };
+  if (/^\d+(\.\d+)?e[+-]?\d+$/i.test(s)) return { phone: '', status: 'damaged' };
+  const compact = s.replace(/[\s\-().]/g, '');
+  if (/^\+?233\d{9}$/.test(compact)) return { phone: '0' + compact.replace(/^\+?233/, ''), status: 'fixed' };
+  if (/^0\d{9}$/.test(compact)) return { phone: compact, status: 'ok' };
+  if (/^[1-9]\d{8}$/.test(compact)) return { phone: '0' + compact, status: 'fixed' };
+  return { phone: s, status: 'odd' };
+}
+
+// Dates arrive as 2026-10-11 or, from Excel in Ghana, 11/10/2026 (day first).
+function cleanDate(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return { date: null, ok: true };
+  let y, mo, d;
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) [, y, mo, d] = m;
+  else if ((m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/))) [, d, mo, y] = m;
+  else return { date: null, ok: false };
+  const t = new Date(Date.UTC(+y, +mo - 1, +d));
+  if (t.getUTCFullYear() !== +y || t.getUTCMonth() !== +mo - 1 || t.getUTCDate() !== +d) return { date: null, ok: false };
+  return { date: `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`, ok: true };
+}
+
+const importNorm = (v) => String(v || '').trim().toLowerCase();
+const samePhone = (a, b) => !!a && !!b && String(a).replace(/\D/g, '').slice(-9) === String(b).replace(/\D/g, '').slice(-9);
+const nameList = (arr) => (arr.length > 6 ? `${arr.slice(0, 6).join(', ')} and ${arr.length - 6} more` : arr.join(', '));
+
+// Same name is not enough to be the same person: use the phone number when the file and the record both have one.
+function findExistingMember(pool, name, phone) {
+  const sameName = pool.filter((m) => importNorm(m.name) === importNorm(name));
+  if (phone) {
+    const withPhone = sameName.find((m) => samePhone(m.phone, phone));
+    if (withPhone) return withPhone;
+  }
+  const candidates = sameName.filter((m) => !phone || !m.phone || samePhone(m.phone, phone));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function MemberImport() {
   const { data, save } = useData();
   const { role } = useAuth();
@@ -188,42 +231,74 @@ function MemberImport() {
     try {
       const rows = parseCSV(await file.text());
       if (!rows.length) { setMsg({ ok: false, text: 'No rows found in that file — check it has a header row plus at least one member.' }); return; }
-      const byName = new Map(data.members.map((m) => [m.name.trim().toLowerCase(), m]));
-      let added = 0, updated = 0, skipped = 0;
+
+      // A working copy that grows as members are added. Every new row looks at it, so each new member gets the
+      // next free ID instead of every row being given the same "next" ID from the unchanged member list.
+      const working = [...data.members];
+      const childByMember = new Map((data.children || []).map((c) => [c.member_id, c]));
+      const history = data.member_group_history || [];
+      let added = 0, updated = 0, skipped = 0, phonesFixed = 0;
+      const damagedPhones = [], oddPhones = [], badDates = [], idTaken = [];
+
       for (const r of rows) {
         const name = (r.name || '').trim();
         if (!name) { skipped++; continue; }
-        const match = byName.get(name.toLowerCase());
-        const status = r.status || match?.status || 'Active';
-        const memberType = ['Adult','Omega','Child'].includes(r.member_type) ? r.member_type : (match?.member_type || 'Adult');
-        const memberCode = (match?.member_code || nextMemberCode(data.members, memberType, data.member_group_history)).trim();
-        const duplicate = data.members.find(m => String(m.member_code || '').trim().toLowerCase() === memberCode.toLowerCase() && m.id !== match?.id);
-        if (duplicate) { skipped++; continue; }
+
+        const ph = cleanPhone(r.phone);
+        if (ph.status === 'fixed') phonesFixed++;
+        if (ph.status === 'damaged') damagedPhones.push(name);
+        if (ph.status === 'odd') oddPhones.push(name);
+        const dob = cleanDate(r.dob);
+        if (!dob.ok) badDates.push(name);
+
+        const typeIn = ['Adult', 'Omega', 'Child'].find((t) => t.toLowerCase() === importNorm(r.member_type));
+        const providedCode = String(r.member_code || '').trim().toUpperCase();
+        const codeOwner = providedCode ? working.find((m) => importNorm(m.member_code) === providedCode.toLowerCase()) : null;
+
+        let match = null;
+        if (codeOwner && importNorm(codeOwner.name) === importNorm(name)) match = codeOwner;
+        else if (codeOwner) idTaken.push(`${providedCode} (${codeOwner.name})`);
+        if (!match) match = findExistingMember(working, name, ph.phone);
+
+        const memberType = typeIn || match?.member_type || 'Adult';
+        const statusIn = STATUS.find((s) => s.toLowerCase() === importNorm(r.status));
+        const status = statusIn || match?.status || 'Active';
+
+        let memberCode;
+        if (match) memberCode = (match.member_code || nextMemberCode(working, memberType, history)).trim();
+        else if (providedCode && !codeOwner) memberCode = providedCode;
+        else memberCode = nextMemberCode(working, memberType, history);
+
         const importId = match ? match.id : uuid();
         const importedMember = {
           id: importId,
           member_code: memberCode,
           name,
-          phone: r.phone || match?.phone || '',
+          phone: ph.phone || match?.phone || '',
           email: r.email || match?.email || '',
-          dob: r.dob || match?.dob || null,
+          dob: dob.date || match?.dob || null,
           gender: r.gender || match?.gender || null,
           member_type: memberType,
           grp: r.grp || r.group || match?.grp || '',
-          status: STATUS.includes(status) ? status : 'Active',
+          status,
           address: r.address || match?.address || '',
           parent1_name: r.parent1_name || match?.parent1_name || '',
-          parent1_phone: r.parent1_phone || match?.parent1_phone || '',
+          parent1_phone: cleanPhone(r.parent1_phone).phone || match?.parent1_phone || '',
           parent1_relationship: r.parent1_relationship || match?.parent1_relationship || '',
           parent2_name: r.parent2_name || match?.parent2_name || '',
-          parent2_phone: r.parent2_phone || match?.parent2_phone || '',
+          parent2_phone: cleanPhone(r.parent2_phone).phone || match?.parent2_phone || '',
           parent2_relationship: r.parent2_relationship || match?.parent2_relationship || '',
           notes: r.notes || match?.notes || '',
         };
         save('members', importedMember);
+
+        // Reserve the ID straight away so the next row cannot be given it.
+        if (match) working[working.findIndex((m) => m.id === importId)] = { ...match, ...importedMember };
+        else working.push(importedMember);
+
         if (memberType === 'Child') {
-          const existingChild = (data.children || []).find(c => c.member_id === importId);
-          save('children', {
+          const existingChild = childByMember.get(importId);
+          const childRecord = {
             ...(existingChild || {}),
             id: existingChild?.id || uuid(),
             member_id: importId,
@@ -233,11 +308,20 @@ function MemberImport() {
             guardian_name: [importedMember.parent1_name, importedMember.parent2_name].filter(Boolean).join(' / '),
             guardian_phone: [importedMember.parent1_phone, importedMember.parent2_phone].filter(Boolean).join(' / '),
             status: ['Inactive', 'Left'].includes(importedMember.status) ? 'Inactive' : 'Active',
-          });
+          };
+          save('children', childRecord);
+          childByMember.set(importId, childRecord);
         }
         match ? updated++ : added++;
       }
-      setMsg({ ok: true, text: `Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped.` : ''}.` });
+
+      const lines = [`Done — ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped (no name)` : ''}.`];
+      if (phonesFixed) lines.push(`${phonesFixed} phone number${phonesFixed === 1 ? ' had its' : 's had their'} leading 0 put back.`);
+      if (damagedPhones.length) lines.push(`${damagedPhones.length} phone number${damagedPhones.length === 1 ? ' was' : 's were'} damaged by Excel (shown like 2.43E+08) and left blank, so please enter them again: ${nameList(damagedPhones)}.`);
+      if (oddPhones.length) lines.push(`Check the phone number for: ${nameList(oddPhones)}.`);
+      if (badDates.length) lines.push(`Date of birth not understood (use DD/MM/YYYY or YYYY-MM-DD) for: ${nameList(badDates)}.`);
+      if (idTaken.length) lines.push(`These Member IDs already belong to someone else, so new IDs were given: ${nameList(idTaken)}.`);
+      setMsg({ ok: true, text: lines.join('\n') });
     } catch (err) {
       setMsg({ ok: false, text: 'Could not read that file. Make sure it is a plain CSV export.' });
     } finally {
@@ -257,10 +341,12 @@ function MemberImport() {
         </div>
       </div>
       <p className="muted sm">
-        CSV columns: <code>{MEMBER_CSV_FIELDS.join(', ')}</code>. Matching by name — a row whose name already
-        exists updates that member instead of creating a duplicate.
+        CSV columns: <code>{MEMBER_CSV_FIELDS.join(', ')}</code>. Leave <code>member_code</code> empty and each new
+        member is given the next free ID. A row updates an existing member when the Member ID matches, or when the
+        name matches and the phone number does not point to a different person. In Excel, format the phone column as
+        Text first so leading zeros are kept.
       </p>
-      {msg && <div className={msg.ok ? 'muted' : 'err'} style={{ marginTop: 8 }}>{msg.text}</div>}
+      {msg && <div className={msg.ok ? 'muted' : 'err'} style={{ marginTop: 8, whiteSpace: 'pre-line' }}>{msg.text}</div>}
     </div>
   );
 }
@@ -1010,8 +1096,8 @@ export function ServiceTimerLive() {
 /* ---------------- SMS ---------------- */
 export function SendSMS() {
   const { data } = useData();
-  const { role } = useAuth();
-  const allowed = ['admin', 'secretary'].includes(role) || isSuperAdmin(role);
+  const { hasPermission } = useAuth();
+  const allowed = hasPermission('sms.send');
   const groups = [...new Set(data.members.map((m) => m.grp).filter(Boolean))].sort();
 
   const [audience, setAudience] = useState('active');
@@ -1025,7 +1111,7 @@ export function SendSMS() {
   if (!allowed) return (
     <>
       <div className="top"><h1>Send SMS</h1></div>
-      <div className="panel"><p className="muted">Only admins and secretaries can send SMS.</p></div>
+      <div className="panel"><p className="muted">You do not have permission to send SMS. Ask a Super Admin to tick Send SMS for your role under Role Permissions.</p></div>
     </>
   );
 
@@ -2223,6 +2309,8 @@ function auditRecordLabel(r, memberMap) {
 }
 
 const AUDIT_SKIP_FIELDS = new Set(['id', 'updated_at', 'created_at', 'created_by', 'updated_by']);
+// Free-text and sensitive fields: the log says they changed, but does not copy the old and new text onto the screen.
+const AUDIT_PRIVATE_FIELDS = new Set(['notes', 'private_notes', 'medical_notes', 'pickup_notes', 'pickup_code', 'message', 'body', 'address', 'photo_url', 'metadata', 'provider_payload', 'payload']);
 const auditValue = (k, v) => {
   if (v === null || v === undefined || v === '') return 'empty';
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
@@ -2239,7 +2327,7 @@ function auditChanges(r) {
   for (const k of Object.keys(r.new_row)) {
     if (AUDIT_SKIP_FIELDS.has(k)) continue;
     if (JSON.stringify(r.old_row[k]) === JSON.stringify(r.new_row[k])) continue;
-    out.push(hide && hide.has(k) ? `${auditPretty(k)} changed` : `${auditPretty(k)}: ${auditValue(k, r.old_row[k])} \u2192 ${auditValue(k, r.new_row[k])}`);
+    out.push((hide && hide.has(k)) || AUDIT_PRIVATE_FIELDS.has(k) ? `${auditPretty(k)} changed` : `${auditPretty(k)}: ${auditValue(k, r.old_row[k])} \u2192 ${auditValue(k, r.new_row[k])}`);
   }
   return out;
 }
@@ -2251,7 +2339,7 @@ export function AuditLog() {
   const load=()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(async({data,error})=>{
     if(error){setError(error.message);return;}
     setError(''); const list=data||[]; setRows(list);
-    // Look up member ID + name for rows that point at a member, so they can be shown as e.g. "TTA12 · Kwame Mensah".
+    // Look up member ID + name for rows that point at a member, so they can be shown as e.g. "DTA12 · Kwame Mensah".
     const ids=[...new Set(list.map(r=>(auditSnapshot(r)||{}).member_id).filter(Boolean))];
     const map={};
     for(let i=0;i<ids.length;i+=100){
@@ -2898,7 +2986,7 @@ function FinanceCenterScreen() {
 /* ---------------- Church Expenditure ---------------- */
 export function Expenditure() {
   const { hasPermission } = useAuth();
-  if (!hasPermission('finance.view')) {
+  if (!hasPermission('expenditure.view')) {
     return (
       <div className="panel">
         <h2>Expenditure</h2>
@@ -2913,7 +3001,7 @@ function ExpenditureScreen() {
   const { data, save, remove } = useData();
   const { hasPermission, role, profile } = useAuth();
 
-  const canWrite = hasPermission('finance.manage') && role !== 'pastor' && !hasPermission('finance_reviewer.approve');
+  const canWrite = hasPermission('expenditure.manage') && role !== 'pastor' && !hasPermission('finance_reviewer.approve');
   const canReviewFinance = hasPermission('finance_reviewer.approve');
   const isPastor = role === 'pastor';
 
@@ -3666,7 +3754,7 @@ export function CommunicationCenter() {
   return <>
     <div className="top"><div><h1>Communication Center</h1><div className="muted">Manage church announcements and prepare targeted member communication.</div></div></div>
     <div className="cards"><div className="card"><div className="label">Active members with phone</div><div className="num">{active}</div></div><div className="card"><div className="label">Announcements</div><div className="num">{data.announcements.length}</div></div></div>
-    <Crud table="announcements" title="Church Announcements" noun="announcement" allowWrite={true} sortKey="created_at" sortDir="desc" searchKeys={['title','body','audience']} defaults={{audience:'All Members',active:true}}
+    <Crud table="announcements" title="Church Announcements" noun="announcement" sortKey="created_at" sortDir="desc" searchKeys={['title','body','audience']} defaults={{audience:'All Members',active:true}}
       filters={[{key:'active',label:'All statuses',options:['true','false']} ,{key:'audience',label:'All audiences',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']} ]}
       fields={[{key:'title',label:'Title',required:true},{key:'body',label:'Message',type:'textarea',required:true,full:true},{key:'audience',label:'Audience',type:'select',options:['All Members','Youth','Children','Men','Women','Department','House Fellowship']},{key:'publish_from',label:'Publish from',type:'date'},{key:'publish_until',label:'Publish until',type:'date'},{key:'active',label:'Published / active',type:'checkbox'}]}
       columns={[{label:'Title',key:'title'},{label:'Announcement content',key:'body'},{label:'Audience',key:'audience'},{label:'Publish from',key:'publish_from'},{label:'Status',render:a=>badge(a.active===false?'Inactive':'Active')}]}
@@ -3676,6 +3764,12 @@ export function CommunicationCenter() {
 }
 
 export function PastorDashboard({ onNavigate }) {
+  const { role } = useAuth();
+  if (!['admin','secretary','viewer','pastor'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
+  return <PastorDashboardScreen onNavigate={onNavigate} />;
+}
+
+function PastorDashboardScreen({ onNavigate }) {
   const { data, save } = useData();
   const { role, profile } = useAuth();
   const canCase = can(role, 'pastoral_cases', 'write') || role === 'pastor' || isSuperAdmin(role);
@@ -3686,7 +3780,6 @@ export function PastorDashboard({ onNavigate }) {
   const [followForm, setFollowForm] = useState({ date: today(), member_id: '', person_name: '', phone: '', category: 'Member', reason: '', assigned_to: '', method: 'Phone', status: 'Open', notes: '' });
   const [memberQ, setMemberQ] = useState('');
 
-  if (!['admin','secretary','viewer','pastor'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
 
   const pastoralCases = data.pastoral_cases || [];
   const followUps = data.follow_ups || [];
