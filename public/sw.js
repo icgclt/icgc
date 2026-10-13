@@ -24,7 +24,9 @@ self.addEventListener('activate', (event) => {
 });
 
 async function trim(cache) {
-  const keys = await cache.keys();
+  // Remove the oldest saved files, but never the app shell itself (index.html, icons, manifest).
+  const shell = new Set(SHELL.map((u) => new URL(u, self.location).href));
+  const keys = (await cache.keys()).filter((req) => !shell.has(req.url));
   const extra = keys.length - MAX_ENTRIES;
   for (let i = 0; i < extra; i++) await cache.delete(keys[i]);
 }
