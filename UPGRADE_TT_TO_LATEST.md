@@ -24,16 +24,30 @@ Run each file as its own new query, in this order, waiting for "Success" each ti
 3. `supabase/migration_53_finance_reviewer_role.sql`
 4. `supabase/migration_54_finance_review_audit.sql`
 5. `supabase/migration_55_finance_status_and_cashbook.sql` (widens the weekly report statuses and creates the Cashbook table only if it is missing)
+6. `supabase/migration_55_cashbook_entries.sql` (Cashbook table and columns; safe if the table already exists)
+7. `supabase/migration_56_security_hardening.sql` (only a Super Admin can grant Super Admin, Pastor and Finance Reviewer; money tables locked for those roles)
+8. `supabase/migration_57_multi_day_events.sql` (lets multi-day programmes save)
+9. `supabase/migration_58_expenditure_permissions.sql` (Expenditure View / Manage checkboxes, copied from existing Finance access)
+10. `supabase/migration_59_sms_permission.sql` (Send SMS becomes its own permission; Admin and Secretary keep it)
+11. `supabase/migration_60_unique_member_code.sql` (stops two members sharing one Member ID; if duplicates exist it only prints a notice, so run `maintenance_preview_duplicate_member_codes.sql`, fix them with `maintenance_repair_duplicate_member_codes.sql`, then run 60 again)
+
+**Run 56, 58 and 59 before the new code goes live.** The new app checks the `expenditure.view` and `sms.send` permissions, so a role that does not have them yet would lose those menu items until the SQL is run.
 
 If one fails, stop and send me the error. Do not skip ahead. Run Step 1 again afterwards: everything should now say `true`.
 
-## 3. Deploy the updated user-management function
+## 3. Deploy the updated functions
 ```bash
 npx supabase link --project-ref avmoellwahpfxtjqkrce
 npx supabase functions deploy admin-users --no-verify-jwt
+npx supabase functions deploy create-member-portal-user --no-verify-jwt
+npx supabase functions deploy member-code-login --no-verify-jwt
+npx supabase functions deploy notification-worker --no-verify-jwt
+npx supabase functions deploy paystack-charge --no-verify-jwt
+npx supabase functions deploy paystack-webhook --no-verify-jwt
+npx supabase functions deploy send-sms --no-verify-jwt
 ```
-Deploy this at the same time as the new code (Step 4): the new Users page and the new function work as a pair.
-The other functions did not change.
+`member-code-login` is new. Deploy these at the same time as the new code (Step 4): the new Users page and the new functions work as a pair.
+If you only use some of these features (for example Paystack), deploy at least `admin-users`, `create-member-portal-user`, `member-code-login` and `send-sms`.
 
 ## 4. Push the code and deploy
 Replace the contents of your repo (https://github.com/icgclt/icgc) with this project, commit, and push.
