@@ -10,7 +10,7 @@ import {
 import { DepartmentDashboard } from './operational';
 import { formatLoginId } from './utils';
 
-const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'ICGC Dominion Temple';
+const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
 
 export default function App() {
   if (!configured) return <SetupHelp />;

@@ -13,7 +13,7 @@ export function memberLoginEmail(value) {
   const phone = normalizePhone(value);
   const digits = phone.replace(/\D/g, '');
   if (!/^233\d{9}$/.test(digits)) return '';
-  return `member-${digits}@members.icgcdt.local`;
+  return `member-${digits}@members.icgctt.local`;
 }
 
 const Ctx = createContext(null);
