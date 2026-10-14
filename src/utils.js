@@ -158,12 +158,12 @@ export function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-/** Show phone for member portal logins instead of member-233...@members.icgctt.local */
+/** Show phone for member portal logins instead of member-233...@members.icgcdt.local */
 export function formatLoginId(value) {
   const s = String(value || '');
-  const m = s.match(/^member-233(\d{9})@members\.icgctt\.local$/i);
+  const m = s.match(/^member-233(\d{9})@members\.icgcdt\.local$/i);
   if (m) return `0${m[1]}`;
-  const m2 = s.match(/^member-(\d+)@members\.icgctt\.local$/i);
+  const m2 = s.match(/^member-(\d+)@members\.icgcdt\.local$/i);
   if (m2) return m2[1];
   return s;
 }

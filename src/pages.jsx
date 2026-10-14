@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
 import { useData } from './data';
+import BackupPanel from './BackupPanel';
 import { supabase } from './supabase';
 import Crud, { StoragePhoto } from './Crud';
 import { money, today, downloadCSV, download, parseCSV, uuid, upcomingEvents as pickUpcomingEvents, eventInProgress, escapeHtml as esc, formatLoginId } from './utils';
@@ -15,9 +16,9 @@ const displayMemberLogin = (value) => formatLoginId(value);
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const dayName = (iso) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long' }) : '';
-// Member IDs start with the church's letters: adults <P>A, Omega <P>O, children <P>C (e.g. TTA1 for ICGC Testimony Temple).
-// Set VITE_MEMBER_CODE_PREFIX in .env to override. Default is TT for Testimony Temple.
-const MEMBER_PREFIX = (import.meta.env.VITE_MEMBER_CODE_PREFIX || 'TT').toUpperCase();
+// Member IDs start with the church's letters: adults <P>A, Omega <P>O, children <P>C (e.g. DTA1 for ICGC Dominion Temple).
+// Set VITE_MEMBER_CODE_PREFIX in .env to override. Default is DT for Dominion Temple.
+const MEMBER_PREFIX = (import.meta.env.VITE_MEMBER_CODE_PREFIX || 'DT').toUpperCase();
 const [PFX_ADULT, PFX_OMEGA, PFX_CHILD] = [`${MEMBER_PREFIX}A`, `${MEMBER_PREFIX}O`, `${MEMBER_PREFIX}C`];
 const PFX_RE = new RegExp(`^(${PFX_ADULT}|${PFX_OMEGA}|${PFX_CHILD})`);
 const PFX_NUM_RE = new RegExp(`^(${PFX_ADULT}|${PFX_OMEGA}|${PFX_CHILD})(\\d+)$`);
@@ -1088,7 +1089,7 @@ export function ServiceTimerLive() {
   if(!items.length)return <div className="panel"><h1>Live Countdown</h1><p className="muted">No timer items yet. Add them under Service Countdown → Timer Setup.</p></div>;
   const current=items[active];
   return <div className="timer-live-page">
-    <div className="timer-live-head"><div><div className="timer-live-church">{import.meta.env.VITE_CHURCH_NAME || 'Church'}</div><h1>{current?.person||'Service Countdown'}</h1><div className="timer-live-role">{current?.role||''}</div></div><select value={active} onChange={e=>{setRunning(false);setOvertime(false);setActive(Number(e.target.value));setRemaining(0);}}>{items.map((x,i)=><option key={x.id} value={i}>{i+1}. {x.person}</option>)}</select></div>
+    <div className="timer-live-head"><div><div className="timer-live-church">{import.meta.env.VITE_CHURCH_NAME || 'ICGC Dominion Temple'}</div><h1>{current?.person||'Service Countdown'}</h1><div className="timer-live-role">{current?.role||''}</div></div><select value={active} onChange={e=>{setRunning(false);setOvertime(false);setActive(Number(e.target.value));setRemaining(0);}}>{items.map((x,i)=><option key={x.id} value={i}>{i+1}. {x.person}</option>)}</select></div>
     <div className="timer-live-main"><div className={'timer-live-clock '+(overtime?'overtime':'')}>{overtime?'TIME UP':fmt(remaining)}</div><div className="timer-live-meta">{current?.minutes||0} minutes</div><div className="timer-live-actions"><button className="primary" onClick={()=>remaining?setRunning(x=>!x):start(active)}>{running?'Pause':remaining?'Resume':'Start'}</button><button className="secondary" onClick={reset}>Reset</button><button className="secondary" onClick={next} disabled={active>=items.length-1}>Next</button></div><p className="muted sm">This view fills the available screen for projection.</p></div>
   </div>;
 }
@@ -2414,6 +2415,8 @@ export function Settings() {
     if (!window.confirm('This will permanently delete the church test data from Supabase. User accounts and system settings will remain. Continue?')) return;
     setResetBusy(true);
     try {
+      // Best effort: keep a snapshot so cleared data can be brought back (needs migration 61).
+      try { await supabase.rpc('create_backup_snapshot', { p_note: 'Before clearing test data', p_kind: 'manual' }); } catch { /* ignore */ }
       await clearTestData();
       setResetPhrase('');
       setResetMsg({ t: 'Test data cleared successfully. The system is ready for real data entry.' });
@@ -2452,19 +2455,13 @@ export function Settings() {
       {isSuperAdmin(role) && <div className="panel" style={{ border: '2px solid #b91c1c' }}>
           <h2>Clear Test Data</h2>
           <p className="muted">Super Admin only. Use this once testing is complete. It permanently removes operational/test records from the church database while keeping administrator accounts, user roles, database structure and system settings.</p>
-          <p><b>Before using this:</b> make a backup if you may need any of the test records later.</p>
+          <p><b>Before using this:</b> download a backup (Backup &amp; Restore below) if you may need any of the test records later. A server snapshot is also saved automatically when the database upgrade is installed.</p>
           <label>Type <code>CLEAR TEST DATA</code> to confirm</label>
           <input value={resetPhrase} onChange={e => setResetPhrase(e.target.value)} placeholder="CLEAR TEST DATA" style={{ width: '100%', maxWidth: 420, marginBottom: 10 }} disabled={resetBusy} />
           {resetMsg && <div className={resetMsg.bad ? 'err' : 'muted'} style={{ marginBottom: 10 }}>{resetMsg.t}</div>}
           <button className="danger" onClick={handleClearTestData} disabled={resetBusy || resetPhrase.trim() !== 'CLEAR TEST DATA'}>{resetBusy ? 'Clearing test data...' : 'Permanently Clear Test Data'}</button>
         </div>}
-      {(isAdmin(role) || isSuperAdmin(role)) && <div className="panel">
-        <h2>Backup</h2>
-        <p className="muted">Your data lives in Supabase. Download a copy of what this device can see. This is for administrators only.</p>
-        <button className="secondary" onClick={() => download(`church-backup-${today()}.json`, JSON.stringify({ exportedAt: new Date().toISOString(), data }, null, 2), 'application/json')}>
-          Download JSON backup
-        </button>
-      </div>}
+      {(isAdmin(role) || isSuperAdmin(role)) && <BackupPanel role={role} online={online} pending={pending} syncNow={syncNow} />}
     </>
   );
 }
@@ -4026,7 +4023,7 @@ export function MemberGiving() {
   const pending=rows.filter(r=>r.status==='Pending').reduce((a,r)=>a+Number(r.amount||0),0);
   const issueReceipt=(r)=>{
     const receipt=r.receipt_number||`R-${String(r.id).replace(/-/g,'').slice(0,8).toUpperCase()}`;
-    const html=`<html><head><title>Church Receipt ${esc(receipt)}</title><style>body{font-family:Arial;padding:35px;max-width:650px;margin:auto}h1{text-align:center}hr{border:0;border-top:1px solid #ddd}.row{display:flex;justify-content:space-between;padding:9px 0}.total{font-size:24px;font-weight:700}</style></head><body><h1>${esc(import.meta.env.VITE_CHURCH_NAME||'Church')}<br><small>Giving Receipt</small></h1><hr><div class="row"><b>Receipt</b><span>${esc(receipt)}</span></div><div class="row"><b>Member / donor</b><span>${esc(r.member_name||'Anonymous')}</span></div><div class="row"><b>Fund</b><span>${esc(r.fund||'')}</span></div><div class="row"><b>Method</b><span>${esc(r.method||'')}${esc(r.provider?' / '+r.provider:'')}</span></div><div class="row"><b>Reference</b><span>${esc(r.reference||'')}</span></div><hr><div class="row total"><span>Amount</span><span>GH₵ ${Number(r.amount||0).toFixed(2)}</span></div><p>Paid: ${esc(r.paid_at||r.created_at||'')}</p><p style="color:#666">Thank you for your contribution.</p><script>window.print()</script></body></html>`;
+    const html=`<html><head><title>Church Receipt ${esc(receipt)}</title><style>body{font-family:Arial;padding:35px;max-width:650px;margin:auto}h1{text-align:center}hr{border:0;border-top:1px solid #ddd}.row{display:flex;justify-content:space-between;padding:9px 0}.total{font-size:24px;font-weight:700}</style></head><body><h1>${esc(import.meta.env.VITE_CHURCH_NAME||'ICGC Dominion Temple')}<br><small>Giving Receipt</small></h1><hr><div class="row"><b>Receipt</b><span>${esc(receipt)}</span></div><div class="row"><b>Member / donor</b><span>${esc(r.member_name||'Anonymous')}</span></div><div class="row"><b>Fund</b><span>${esc(r.fund||'')}</span></div><div class="row"><b>Method</b><span>${esc(r.method||'')}${esc(r.provider?' / '+r.provider:'')}</span></div><div class="row"><b>Reference</b><span>${esc(r.reference||'')}</span></div><hr><div class="row total"><span>Amount</span><span>GH₵ ${Number(r.amount||0).toFixed(2)}</span></div><p>Paid: ${esc(r.paid_at||r.created_at||'')}</p><p style="color:#666">Thank you for your contribution.</p><script>window.print()</script></body></html>`;
     const w=window.open('','_blank','width=760,height=800'); if(w){w.opener=null;w.document.write(html);w.document.close();}
   };
   return <>
@@ -4129,7 +4126,7 @@ function AutomationCenterScreen() {
     save('communication_queue',{id:uuid(),member_id:m.id||null,member_name:m.name||m.full_name||'',phone:m.phone||'',channel,template_id:template?.id||null,trigger_type:type,scheduled_for:new Date().toISOString(),status:'Queued',message:body});
     return true;
   };
-  const personalize=(body,m)=>String(body||'').replaceAll('{{name}}',m.name||m.full_name||'Member').replaceAll('{{church}}',import.meta.env.VITE_CHURCH_NAME||'Church');
+  const personalize=(body,m)=>String(body||'').replaceAll('{{name}}',m.name||m.full_name||'Member').replaceAll('{{church}}',import.meta.env.VITE_CHURCH_NAME||'ICGC Dominion Temple');
   function queueBirthdays(){let n=0;birthdays.forEach(m=>{if(birthdayTemplate&&enqueue(m,birthdayTemplate,'Birthday',personalize(birthdayTemplate.body,m)))n++;});setRunMsg(`${n} birthday message${n===1?'':'s'} queued.`);}
   function queueVisitors(){let n=0;recentVisitors.forEach(v=>{const m={id:null,name:v.name,phone:v.phone};if(visitorTemplate&&enqueue(m,visitorTemplate,'New Visitor',personalize(visitorTemplate.body,m)))n++;});setRunMsg(`${n} visitor follow-up message${n===1?'':'s'} queued.`);}
   return <>
