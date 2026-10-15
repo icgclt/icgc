@@ -524,6 +524,7 @@ export function Members() {
 
 export function MemberLookup() {
   const { data } = useData();
+  const { role } = useAuth();
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const members = data.members || [];
@@ -564,7 +565,7 @@ export function MemberLookup() {
         <div className="panel"><h2>Welfare Dues</h2><div className="tablewrap"><table><thead><tr><th>Month</th><th>Amount</th></tr></thead><tbody>{welfare.slice(0,30).map(r=><tr key={r.id}><td>{MONTHS[Number(r.month)-1]} {r.year}</td><td>{money(r.amount)}</td></tr>)}{!welfare.length&&<tr><td colSpan="2" className="empty">No Welfare Dues records.</td></tr>}</tbody></table></div></div>
       </div>
       <div className="panel"><h2>Payments and receipts</h2><div className="tablewrap"><table><thead><tr><th>Date</th><th>Fund</th><th>Amount</th><th>Method</th><th>Status</th><th>Reference</th></tr></thead><tbody>{receipts.slice(0,50).map(r=><tr key={r.id}><td>{String(r.paid_at||r.created_at||'').slice(0,10)}</td><td>{r.fund}</td><td>{money(r.amount)}</td><td>{r.method || ''}</td><td>{badge(r.status)}</td><td>{r.reference || r.receipt_number || ''}</td></tr>)}{!receipts.length&&<tr><td colSpan="6" className="empty">No digital receipts linked to this member.</td></tr>}</tbody></table></div>{requests.length>0&&<p className="muted sm">There are also {requests.length} Mobile Money payment request(s) for this member.</p>}</div>
-      <div className="grid2"><div className="panel"><h2>Prayer requests</h2>{prayers.slice(0,20).map(r=><div className="listrow" key={r.id}><span>{r.request}</span>{badge(r.status)}</div>)}{!prayers.length&&<div className="empty">No prayer requests.</div>}</div><div className="panel"><h2>Follow-up</h2>{followups.slice(0,20).map(r=><div className="listrow" key={r.id}><span>{r.reason || r.type || r.notes || 'Follow-up'}</span>{badge(r.status)}</div>)}{!followups.length&&<div className="empty">No follow-up records.</div>}</div></div>
+      <div className="grid2">{role==='pastor'&&<div className="panel"><h2>Prayer requests</h2>{prayers.slice(0,20).map(r=><div className="listrow" key={r.id}><span>{r.request}</span>{badge(r.status)}</div>)}{!prayers.length&&<div className="empty">No prayer requests.</div>}</div>}<div className="panel"><h2>Follow-up</h2>{followups.slice(0,20).map(r=><div className="listrow" key={r.id}><span>{r.reason || r.type || r.notes || 'Follow-up'}</span>{badge(r.status)}</div>)}{!followups.length&&<div className="empty">No follow-up records.</div>}</div></div>
     </>}
   </>;
 }
@@ -2220,6 +2221,8 @@ export function FollowUps() {
 }
 
 export function PrayerRequests() {
+  const { role } = useAuth();
+  if (role !== 'pastor') return <div className="panel"><h2>Prayer Requests</h2><p className="muted">Prayer requests are private to the Pastor.</p></div>;
   return <Crud table="prayer_requests" title="Prayer Requests" noun="prayer request" sortKey="date" sortDir="desc" searchKeys={['requester','member_id','request','category','assigned_to']}
     filters={[{key:'status',label:'All statuses',options:['New','Assigned','Praying','Answered','Closed']},{key:'category',label:'All categories',options:['General','Healing','Family','Finance','Work','Salvation','Thanksgiving','Other']}]}
     defaults={{date:today(),status:'New',category:'General',confidential:false}}
@@ -2247,6 +2250,8 @@ export function ServicePlans() {
 }
 
 export function PastoralCare() {
+  const { role } = useAuth();
+  if (role !== 'pastor') return <div className="panel"><h2>Pastoral Care</h2><p className="muted">Pastoral care is private to the Pastor.</p></div>;
   return <Crud table="pastoral_cases" title="Pastoral Care" noun="case" sortKey="opened_date" sortDir="desc" searchKeys={['person_name','member_id','category','assigned_to']}
     filters={[{key:'status',label:'All statuses',options:['Open','In Progress','Resolved','Closed']},{key:'priority',label:'All priorities',options:['Low','Normal','High','Urgent']},{key:'category',label:'All categories',options:['Counselling','Prayer / Spiritual Support','Hospital / Illness','Bereavement','Marriage / Family','Financial / Welfare','Crisis / Emergency','New Member Follow-up','Other']}]}
     defaults={{opened_date:today(),status:'Open',priority:'Normal'}}
@@ -2332,6 +2337,7 @@ function auditChanges(r) {
   }
   return out;
 }
+const PASTOR_ONLY_TABLES = new Set(['prayer_requests', 'pastoral_cases']);
 export function AuditLog() {
   const { role } = useAuth();
   const [rows,setRows]=useState([]); const [error,setError]=useState(''); const [notice,setNotice]=useState('');
@@ -2339,7 +2345,7 @@ export function AuditLog() {
   const [memberMap,setMemberMap]=useState({});
   const load=()=>supabase.from('audit_log').select('*').order('at',{ascending:false}).limit(300).then(async({data,error})=>{
     if(error){setError(error.message);return;}
-    setError(''); const list=data||[]; setRows(list);
+    setError(''); const list=(data||[]).filter(r=>role==='pastor'||!PASTOR_ONLY_TABLES.has(r.table_name)); setRows(list);
     // Look up member ID + name for rows that point at a member, so they can be shown as e.g. "DTA12 · Kwame Mensah".
     const ids=[...new Set(list.map(r=>(auditSnapshot(r)||{}).member_id).filter(Boolean))];
     const map={};
@@ -3762,7 +3768,7 @@ export function CommunicationCenter() {
 
 export function PastorDashboard({ onNavigate }) {
   const { role } = useAuth();
-  if (!['admin','secretary','viewer','pastor'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is restricted to church leadership.</p></div>;
+  if (role !== 'pastor') return <div className="panel"><h2>Pastoral Dashboard</h2><p className="muted">This dashboard is private to the Pastor.</p></div>;
   return <PastorDashboardScreen onNavigate={onNavigate} />;
 }
 
@@ -4275,7 +4281,7 @@ export function AdvancedReports() {
         <div className="card"><span className="label">Active members</span><strong>{activeMembers.length}</strong></div>
         <div className="card"><span className="label">Recent engagement</span><strong>{engagementRate}%</strong><span className="muted sm">present in selected period</span></div>
         <div className="card"><span className="label">Open follow-ups</span><strong>{followupsOpen}</strong></div>
-        <div className="card"><span className="label">Open prayer requests</span><strong>{prayerOpen}</strong></div>
+        {role==='pastor'&&<div className="card"><span className="label">Open prayer requests</span><strong>{prayerOpen}</strong></div>}
         <div className="card"><span className="label">Visitors in range</span><strong>{visitorsInRange}</strong></div>
       </div>
       <div className="panel"><h2>Recent service engagement</h2><p className="muted">Members with at least one Present record in the latest recorded services within the selected period.</p><div className="tablewrap"><table><thead><tr><th>Member</th><th>Status</th><th>Recent attendance</th></tr></thead><tbody>{activeMembers.filter(m=>recentSessions.length && !presentIds.has(m.id)).slice(0,50).map(m=><tr key={m.id}><td><b>{m.name}</b></td><td>{m.status}</td><td className="muted">No Present mark in recent recorded services</td></tr>)}{(!recentSessions.length||!activeMembers.some(m=>!presentIds.has(m.id)))&&<tr><td colSpan="3" className="empty">No engagement gaps to display from the available attendance records.</td></tr>}</tbody></table></div></div>

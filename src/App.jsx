@@ -155,6 +155,9 @@ function Pending() {
 
 // A plain entry is [id, label, Component, permissionKey].
 // A group is { group, label, items: [...entries] }.
+// Pastoral Care, Prayer Requests and the Pastoral Dashboard are private to the Pastor role.
+const PASTOR_ONLY = new Set(['prayer', 'pastoral', 'pastordashboard']);
+
 const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, 'dashboard.view'],
   ['memberportal', '🙋 My Church', MemberPortal, null],
@@ -255,10 +258,10 @@ const CURRENT_PERMISSION_CATALOG = [
   ['visitors.manage','visitors','manage','Manage Visitors','Create, edit and manage visitors'],
   ['followups.view','follow_ups','view','View Follow-ups','View follow-up records'],
   ['followups.manage','follow_ups','manage','Manage Follow-ups','Create, edit and manage follow-ups'],
-  ['prayer_requests.view','prayer_requests','view','View Prayer Requests','View prayer requests'],
-  ['prayer_requests.manage','prayer_requests','manage','Manage Prayer Requests','Manage prayer requests'],
-  ['pastoral_cases.view','pastoral_care','view','View Pastoral Care','View pastoral care cases and pastoral dashboard'],
-  ['pastoral_cases.manage','pastoral_care','manage','Manage Pastoral Care','Create, edit and manage pastoral care cases'],
+  ['prayer_requests.view','prayer_requests','view','View Prayer Requests','View prayer requests (Pastor role only)'],
+  ['prayer_requests.manage','prayer_requests','manage','Manage Prayer Requests','Manage prayer requests (Pastor role only)'],
+  ['pastoral_cases.view','pastoral_care','view','View Pastoral Care','View pastoral care cases and pastoral dashboard (Pastor role only)'],
+  ['pastoral_cases.manage','pastoral_care','manage','Manage Pastoral Care','Create, edit and manage pastoral care cases (Pastor role only)'],
   ['notifications.view','notifications','view','View Notifications','View notification tools'],
   ['notifications.manage','notifications','manage','Manage Notifications','Manage church notifications'],
   ['sms.send','sms','send','Send SMS','Send SMS messages to members. Tick this for the Pastor or any other role that should be allowed to send SMS.'],
@@ -424,6 +427,7 @@ function Shell() {
 
   const allowed = ([id, , , need]) => {
     if (role === 'member') return id === 'memberportal';
+    if (PASTOR_ONLY.has(id) && role !== 'pastor') return false;
     if (!need) return true;
     return hasPermission(need);
   };
@@ -438,7 +442,7 @@ function Shell() {
   const fallback = flat.find(([id]) => id === (role === 'member' ? 'memberportal' : 'dashboard')) || flat[0] || allFlat[0];
   // Prefer permitted menu items. Only fall back to the full catalog for staff quick-links (never for members).
   const current = flat.find(([id]) => id === page)
-    || (role !== 'member' ? allFlat.find(([id]) => id === page) : null)
+    || (role !== 'member' ? allFlat.find(([id]) => id === page && !(PASTOR_ONLY.has(id) && role !== 'pastor')) : null)
     || fallback;
   const Current = current?.[2] || (role === 'member' ? MemberPortal : Dashboard);
   const currentId = current?.[0] || (role === 'member' ? 'memberportal' : 'dashboard');

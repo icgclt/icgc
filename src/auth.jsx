@@ -37,9 +37,9 @@ export const PERMS = {
   visitors:               { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   groups:                 { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   follow_ups:             { read: ['admin','finance','secretary','viewer','pastor'], write: ['admin','secretary','pastor'], del: ['admin'] },
-  prayer_requests:        { read: ['admin','finance','secretary','viewer','pastor'], write: ['admin','secretary','pastor'], del: ['admin'] },
+  prayer_requests:        { read: ['pastor'], write: ['pastor'], del: ['pastor'] }, // Pastor only
   service_plans:          { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
-  pastoral_cases:        { read: ['admin','secretary','pastor'], write: ['admin','secretary','pastor'], del: ['admin'] },
+  pastoral_cases:        { read: ['pastor'], write: ['pastor'], del: ['pastor'] }, // Pastor only
   families:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   children:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   child_checkins:         { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },

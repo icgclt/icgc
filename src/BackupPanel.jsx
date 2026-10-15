@@ -173,7 +173,7 @@ export default function BackupPanel({ role, online = true, pending = 0, syncNow 
       {busy && progress && <div className="muted" style={{ marginBottom: 10 }}>⏳ {progress}</div>}
 
       <h3>1. Back up</h3>
-      <p className="muted">Downloads a verified copy of <b>all church records straight from the server</b> (members, attendance, finance, children, events and more). Keep the file safe - it contains private information.{last ? ` Last backup from this device: ${fmtDate(last.at)} (${last.rows.toLocaleString()} records).` : ''}</p>
+      <p className="muted">Downloads a verified copy of <b>all church records straight from the server</b> (members, attendance, finance, children, events and more). Prayer requests and pastoral care cases are private to the Pastor, so they are not in this file (the automatic server snapshots do include them). Keep the file safe - it contains private information.{last ? ` Last backup from this device: ${fmtDate(last.at)} (${last.rows.toLocaleString()} records).` : ''}</p>
       <div className="btnrow">
         <button className="primary" onClick={downloadBackup} disabled={!!busy || !online}>{busy === 'backup' ? 'Backing up…' : 'Download full backup'}</button>
         {installed && <button className="secondary" onClick={takeSnapshot} disabled={!!busy || !online}>Save snapshot on server</button>}
