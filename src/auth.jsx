@@ -40,6 +40,8 @@ export const PERMS = {
   prayer_requests:        { read: ['pastor'], write: ['pastor'], del: ['pastor'] }, // Pastor only
   service_plans:          { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   service_timer_items:    { read: ['admin','finance','secretary','viewer'], write: ['admin','secretary'], del: ['admin','secretary'] },
+  offering_deposits:      { read: ['admin','finance','finance_reviewer','pastor'], write: ['admin','finance'], del: ['admin','finance'] },
+  bank_deposit_settings:  { read: ['admin','finance','finance_reviewer','pastor'], write: ['admin','finance'], del: ['admin'] },
   pastoral_cases:        { read: ['pastor'], write: ['pastor'], del: ['pastor'] }, // Pastor only
   families:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
   children:               { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },

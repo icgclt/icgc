@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
 import { useData } from './data';
 import BackupPanel from './BackupPanel';
+import { DepositAlerts } from './deposit';
 import { supabase } from './supabase';
 import Crud, { StoragePhoto } from './Crud';
 import { money, today, downloadCSV, download, parseCSV, uuid, upcomingEvents as pickUpcomingEvents, eventInProgress, escapeHtml as esc, formatLoginId } from './utils';
@@ -4026,6 +4027,7 @@ function PastorDashboardScreen({ onNavigate }) {
         <div className="card"><div className="label">Approved expenditure</div><div className="num">{money(lockedExpense)}</div></div>
       </>}
     </div>
+    <DepositAlerts />
     <div className="grid2">
       <div className="panel"><h2>Recent attendance trend</h2>{trend.length ? <div className="tablewrap"><table><thead><tr><th>Date</th><th>Present</th></tr></thead><tbody>{trend.map(x => <tr key={x.date}><td>{x.date}</td><td><b>{x.present}</b></td></tr>)}</tbody></table></div> : <div className="empty">No attendance records.</div>}</div>
       <div className="panel">

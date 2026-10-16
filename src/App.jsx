@@ -8,6 +8,7 @@ import {
   WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, EngagementAutomation, FinanceReconciliation, AdvancedReports, NotificationCenter, DeliveryCenter, MemberLookup, FinanceCenter, Expenditure, Cashbook, AutomationCenter,
 } from './pages';
 import { DepartmentDashboard } from './operational';
+import { DepositSlip } from './deposit';
 import { formatLoginId } from './utils';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'Church Management';
@@ -190,6 +191,7 @@ const NAV = [
   ] },
   { group: 'finance', label: '💰 Finance', items: [
     ['financecenter', 'Finance Center', FinanceCenter, 'finance.view'],
+    ['depositslip', 'Deposit Slip', DepositSlip, 'finance.view'],
     ['expenditure', 'Expenditure', Expenditure, 'expenditure.view'],
     ['cashbook', 'Cashbook', Cashbook, 'finance.view'],
     ['financereconciliation', 'Reconciliation', FinanceReconciliation, 'finance_reconciliation.view'],
