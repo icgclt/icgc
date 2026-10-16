@@ -923,7 +923,7 @@ export function Events() {
     <div className="top"><div><h1>Events</h1><div className="muted">Create one-time events, multi-day programmes, or recurring weekly events.</div></div>{canWrite && <button className="primary" onClick={()=>open()}>+ Add event</button>}</div>
     <div className="panel"><div className="toolbar"><input placeholder="Search events" value={q} onChange={e=>setQ(e.target.value)} /></div></div>
     <div className="panel"><div className="tablewrap"><table><thead><tr><th>Date</th><th>Event</th><th>Time</th><th>Location</th><th>Repeat</th><th></th></tr></thead><tbody>
-      {rows.map(e=><tr key={e.id}><td><b>{e.date}</b><br/><small>{dayName(e.date)}</small></td><td><b>{e.title}</b><br/><small>{e.description}</small></td><td>{e.event_time||''}</td><td>{e.location||''}</td><td>{e.recurrence==='weekly' ? `Weekly until ${e.recurrence_end_date}` : e.recurrence==='multi_day' ? `Multi-day programme (${e.duration_days||1} days)` : 'One-time'}</td><td>{canWrite&&<button onClick={()=>open(e)}>Edit</button>} {canDel&&<button className="danger" onClick={()=>remove('events',e.id)}>Delete</button>}</td></tr>)}
+      {rows.map(e=><tr key={e.id}><td><b>{e.date}</b><br/><small>{dayName(e.date)}</small></td><td><b>{e.title}</b><br/><small>{e.description}</small></td><td>{e.event_time||''}</td><td>{e.location||''}</td><td>{e.recurrence==='weekly' ? `Weekly until ${e.recurrence_end_date}` : e.recurrence==='multi_day' ? `Multi-day programme (${e.duration_days||1} days)` : 'One-time'}</td><td>{canWrite&&<button onClick={()=>open(e)}>Edit</button>} {canDel&&<button className="danger" onClick={()=>{ if (confirm(`Delete "${e.title}" on ${e.date}? This cannot be undone.`)) remove('events',e.id); }}>Delete</button>}</td></tr>)}
       {!rows.length&&<tr><td colSpan="6" className="empty">No events.</td></tr>}
     </tbody></table></div></div>
     {form && <div className="modal"><form className="modalcard" onSubmit={submit}><h2>{form.original?'Edit event':'Add event'}</h2>
@@ -1062,23 +1062,44 @@ ${conflicts.slice(0, 8).map(m => m.name).join(', ')}${conflicts.length > 8 ? '�
 /* ---------------- Service Timer ---------------- */
 export function ServiceTimer() {
   const KEY = 'cm:service-timer:v1';
-  const defaults = [{id:uuid(),person:'Worship Leader',role:'Worship',minutes:15},{id:uuid(),person:'Announcements',role:'Announcements',minutes:5},{id:uuid(),person:'Offering',role:'Offering',minutes:10},{id:uuid(),person:'Preacher',role:'Sermon',minutes:45}];
-  const [items,setItems]=useState(()=>{try{const x=JSON.parse(localStorage.getItem(KEY));return Array.isArray(x)&&x.length?x:defaults;}catch{return defaults;}});
+  const { data, save, remove: removeRow } = useData();
+  const { role } = useAuth();
+  const canWrite = can(role, 'service_timer_items', 'write');
+  const defaults = () => [{id:uuid(),person:'Worship Leader',role:'Worship',minutes:15},{id:uuid(),person:'Announcements',role:'Announcements',minutes:5},{id:uuid(),person:'Offering',role:'Offering',minutes:10},{id:uuid(),person:'Preacher',role:'Sermon',minutes:45}];
+  const server = useMemo(()=>[...(data.service_timer_items||[])].sort((a,b)=>(a.position||0)-(b.position||0)).map(r=>({id:r.id,person:r.person,role:r.role||'',minutes:r.minutes})),[data.service_timer_items]);
+  const [items,setItems]=useState(()=>{if(server.length)return server;try{const x=JSON.parse(localStorage.getItem(KEY));return Array.isArray(x)&&x.length?x:defaults();}catch{return defaults();}});
+  const [dirty,setDirty]=useState(false);
+  const [msg,setMsg]=useState('');
+  useEffect(()=>{if(!dirty&&server.length)setItems(server);},[server,dirty]);
   useEffect(()=>{try{localStorage.setItem(KEY,JSON.stringify(items));}catch{}},[items]);
-  const add=()=>setItems(x=>[...x,{id:uuid(),person:'New person',role:'Programme item',minutes:5}]);
-  const update=(id,k,v)=>setItems(x=>x.map(r=>r.id===id?{...r,[k]:k==='minutes'?Math.max(1,Number(v)||1):v}:r));
-  const remove=id=>setItems(x=>x.filter(r=>r.id!==id));
+  const edit=fn=>{setItems(fn);setDirty(true);setMsg('');};
+  const add=()=>edit(x=>[...x,{id:uuid(),person:'New person',role:'Programme item',minutes:5}]);
+  const update=(id,k,v)=>edit(x=>x.map(r=>r.id===id?{...r,[k]:k==='minutes'?Math.max(1,Number(v)||1):v}:r));
+  const remove=id=>edit(x=>x.filter(r=>r.id!==id));
+  const move=(i,d)=>edit(x=>{const j=i+d;if(j<0||j>=x.length)return x;const y=[...x];[y[i],y[j]]=[y[j],y[i]];return y;});
+  const saveAll=()=>{
+    const keep=new Set(items.map(i=>i.id));
+    (data.service_timer_items||[]).forEach(r=>{if(!keep.has(r.id))removeRow('service_timer_items',r.id);});
+    items.forEach((r,i)=>save('service_timer_items',{id:r.id,position:i+1,person:String(r.person||'Item').trim()||'Item',role:r.role||'',minutes:Math.max(1,Number(r.minutes)||1)}));
+    setDirty(false);setMsg('Timer list saved. It will appear on every device after they sync.');
+  };
   return <>
     <div className="top"><div><h1>Service Countdown · Timer Setup</h1><div className="muted">Set the people or programme items and their durations. Use Live Countdown when the service starts.</div></div></div>
-    <div className="panel"><div className="toolbar"><button onClick={add}>+ Add programme item</button><button onClick={()=>setItems(defaults.map(x=>({...x,id:uuid()})))}>Restore sample</button></div></div>
-    <div className="panel"><div className="tablewrap"><table><thead><tr><th>#</th><th>Person / item</th><th>Role</th><th>Minutes</th><th></th></tr></thead><tbody>{items.map((r,i)=><tr key={r.id}><td>{i+1}</td><td><input value={r.person} onChange={e=>update(r.id,'person',e.target.value)}/></td><td><input value={r.role} onChange={e=>update(r.id,'role',e.target.value)}/></td><td><input type="number" min="1" value={r.minutes} onChange={e=>update(r.id,'minutes',e.target.value)} style={{width:90}}/></td><td className="actions"><button className="danger" onClick={()=>remove(r.id)}>Remove</button></td></tr>)}</tbody></table></div></div>
+    <div className="panel"><div className="toolbar"><button onClick={add}>+ Add programme item</button><button onClick={()=>edit(()=>defaults())}>Restore sample</button><button className="primary" disabled={!canWrite||!dirty} onClick={saveAll}>Save timer list</button></div>
+      {dirty&&<p className="muted">You have unsaved changes. {canWrite?'Click Save timer list to share them with all devices.':'Your role cannot save for all devices, so these changes stay on this device only.'}</p>}
+      {!dirty&&msg&&<p className="muted">{msg}</p>}
+      {!dirty&&!msg&&<p className="muted">{server.length?'Showing the saved timer list shared by all devices.':'Not saved to the server yet. Click Save timer list after editing so every device sees it.'}</p>}</div>
+    <div className="panel"><div className="tablewrap"><table><thead><tr><th>#</th><th>Person / item</th><th>Role</th><th>Minutes</th><th></th></tr></thead><tbody>{items.map((r,i)=><tr key={r.id}><td>{i+1}</td><td><input value={r.person} onChange={e=>update(r.id,'person',e.target.value)}/></td><td><input value={r.role} onChange={e=>update(r.id,'role',e.target.value)}/></td><td><input type="number" min="1" value={r.minutes} onChange={e=>update(r.id,'minutes',e.target.value)} style={{width:90}}/></td><td className="actions"><button disabled={i===0} onClick={()=>move(i,-1)} title="Move up">&uarr;</button> <button disabled={i===items.length-1} onClick={()=>move(i,1)} title="Move down">&darr;</button> <button className="danger" onClick={()=>remove(r.id)}>Remove</button></td></tr>)}</tbody></table></div></div>
     <div className="panel"><h2>Ready for service</h2><p className="muted">Go to <b>Service Countdown → Live Countdown</b> to select the current item and display its countdown.</p></div>
   </>;
 }
 
 export function ServiceTimerLive() {
   const KEY='cm:service-timer:v1';
-  const [items,setItems]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY))||[];}catch{return[];}});
+  const { data } = useData();
+  const server = useMemo(()=>[...(data.service_timer_items||[])].sort((a,b)=>(a.position||0)-(b.position||0)).map(r=>({id:r.id,person:r.person,role:r.role||'',minutes:r.minutes})),[data.service_timer_items]);
+  const [localItems,setItems]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY))||[];}catch{return[];}});
+  const items = server.length ? server : localItems;
   const [active,setActive]=useState(0),[remaining,setRemaining]=useState(0),[running,setRunning]=useState(false),[overtime,setOvertime]=useState(false);
   useEffect(()=>{const load=()=>{try{const x=JSON.parse(localStorage.getItem(KEY));if(Array.isArray(x))setItems(x);}catch{}};load();window.addEventListener('storage',load);return()=>window.removeEventListener('storage',load);},[]);
   useEffect(()=>{if(active>=items.length)setActive(Math.max(0,items.length-1));},[items.length,active]);
