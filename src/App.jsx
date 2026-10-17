@@ -272,6 +272,7 @@ const CURRENT_PERMISSION_CATALOG = [
   ['finance.manage','finance','manage','Manage Finance','Create, edit and manage Finance Center records'],
   ['expenditure.view','expenditure','view','View Expenditure','View expenditure records and payment vouchers'],
   ['expenditure.manage','expenditure','manage','Manage Expenditure','Prepare, edit, delete and submit draft expenditure. Approval is a separate permission.'],
+  ['expenditure.reopen','expenditure','reopen','Authorise Reopening of Expenditure','Reopen approved, rejected or submitted expenditure, with a reason. Tick this for whichever group should authorise reopening (for example the Pastor).'],
   ['finance_reviewer.approve','finance_reviewer','approve','Review & Approve Financial Records','Review submitted reports and expenditure; approve, return or reject records. This does not authorize reopening locked records.'],
   ['finance_reconciliation.view','finance_reconciliation','view','View Reconciliation','Access financial reconciliation'],
   ['finance_reconciliation.manage','finance_reconciliation','manage','Manage Reconciliation','Perform financial checking and reconciliation'],
