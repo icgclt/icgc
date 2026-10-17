@@ -211,3 +211,20 @@ button.danger:disabled { opacity: .55; cursor: not-allowed; }
 .pastor-member-hit.selected{border-color:#3182ce;background:#ebf8ff;box-shadow:0 0 0 1px #3182ce33}
 .pastor-form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid #edf2f7}
 @media(max-width:560px){.pastor-form-actions{flex-direction:column-reverse}.pastor-form-actions button{width:100%}.pastor-modal .modalhead{flex-direction:column}}
+
+/* My First Fruit: 12-month grid (green = paid, red = not paid) */
+.ff-top{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:flex-end;margin-bottom:16px}
+.ff-summary strong{display:block;font-size:1.6rem;margin:2px 0}
+.ff-legend{display:flex;gap:8px;margin-left:auto}
+.ff-key{font-size:12px;font-weight:700;color:#fff;border-radius:999px;padding:3px 12px}
+.ff-key.paid{background:#15803d}.ff-key.unpaid{background:#b91c1c}
+.ffgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.fftile{border-radius:12px;padding:14px 8px;text-align:center;color:#fff;min-height:128px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.fftile.paid{background:#15803d}.fftile.unpaid{background:#b91c1c}
+.ffmonth{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.ffcur{font-size:12px;font-weight:600;opacity:.9;margin-top:4px}
+.ffamt{font-size:1.45rem;font-weight:800;line-height:1.15;word-break:break-word}
+.ffamt.ffnone{margin-top:6px;opacity:.85}
+.ffstatus{margin-top:6px;font-size:12px;font-weight:700;background:rgba(255,255,255,.22);border-radius:999px;padding:2px 10px}
+@media(max-width:820px){.ffgrid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:520px){.ffgrid{grid-template-columns:repeat(2,1fr)}.ff-legend{margin-left:0}.ffamt{font-size:1.3rem}}

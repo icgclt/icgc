@@ -124,7 +124,7 @@ async function send(op) {
   }
 }
 
-const activeTablesFor = (role) => role === 'member' ? ['members','attendance','giving','events','prayer_requests','announcements','payment_requests','payment_receipts','member_notification_preferences'] : TABLES;
+const activeTablesFor = (role) => role === 'member' ? ['members','attendance','giving','member_contributions','events','prayer_requests','announcements','payment_requests','payment_receipts','member_notification_preferences'] : TABLES;
 
 // The offline copy lives in IndexedDB, which can only be read asynchronously, so load it first and
 // then start the real provider with it. This takes a fraction of a second.
