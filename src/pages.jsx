@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
 import { useData } from './data';
 import BackupPanel from './BackupPanel';
+import MemberPicker from './MemberPicker';
 import { DepositAlerts } from './deposit';
 import { supabase } from './supabase';
 import Crud, { StoragePhoto } from './Crud';
@@ -1254,7 +1255,7 @@ function ContributionsGrid({ fund, roster, title }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [q, setQ] = useState('');
   const [edits, setEdits] = useState({});
-  const [memberId, setMemberId] = useState(roster[0]?.id || '');
+  const [memberId, setMemberId] = useState('');
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [amount, setAmount] = useState('');
 
@@ -1267,7 +1268,7 @@ function ContributionsGrid({ fund, roster, title }) {
   }, [data.member_contributions, fund, year]);
 
   useEffect(() => { setEdits({}); }, [year, fund]);
-  useEffect(() => { if (!roster.some(m => m.id === memberId)) setMemberId(roster[0]?.id || ''); }, [roster, memberId]);
+  useEffect(() => { if (memberId && !roster.some(m => m.id === memberId)) setMemberId(''); }, [roster, memberId]);
 
   const shown = roster.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()) || String(m.member_code || '').toLowerCase().includes(q.trim().toLowerCase()));
   const valueFor = (name, mth) => {
@@ -1293,6 +1294,7 @@ function ContributionsGrid({ fund, roster, title }) {
       year: Number(year), month: Number(month), amount: n,
     });
     setAmount('');
+    setMemberId('');
     alert(`${fund} payment recorded for ${member.name} for ${MONTHS[month - 1]} ${year}.`);
   };
 
@@ -1324,11 +1326,12 @@ function ContributionsGrid({ fund, roster, title }) {
       <div className="panel">
         <h2>Add payment</h2>
         <div className="formgrid">
-          <div><label>Member</label><select value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">Select member</option>{roster.map(m => <option key={m.id} value={m.id}>{m.name}{m.member_code ? ` · ${m.member_code}` : ''}</option>)}</select></div>
+          <div><label>Member (search by name, ID or phone)</label><MemberPicker roster={roster} value={memberId} onChange={setMemberId} /></div>
           <div><label>Year</label><input type="number" value={year} onChange={e => setYear(Number(e.target.value) || year)} /></div>
           <div><label>Month paid</label><select value={month} onChange={e => setMonth(Number(e.target.value))}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
           <div><label>Amount (GHS)</label><input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
         </div>
+        {memberId && existing.get((roster.find(m => m.id === memberId)?.name || '') + '|' + month) && <p className="muted sm" style={{ marginTop: 8 }}>Already recorded for {MONTHS[month - 1]} {year}: <b>{money(existing.get(roster.find(m => m.id === memberId).name + '|' + month).amount)}</b>. Saving will replace it.</p>}
         <button className="primary" style={{ marginTop: 12 }} onClick={saveEntry}>Record {fund} payment</button>
         <p className="muted sm">The payment is recorded against the month selected above. For example, a payment made for March is recorded under March.</p>
       </div>
