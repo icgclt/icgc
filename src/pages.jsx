@@ -9,6 +9,14 @@ import { money, today, downloadCSV, download, parseCSV, uuid, upcomingEvents as 
 
 const STATUS = ['Active', 'Inactive', 'Visitor', 'Left'];
 const SERVICES = ['Sunday Service', 'Bible Study', 'Prayer Meeting', 'Special Program', 'Other'];
+// Only records that have been submitted for review count in the Cashbook. Drafts (and Returned / Reopened / Rejected
+// records) stay out until they are submitted. Older expenditure records with no status still count.
+const CASHBOOK_REPORT_STATUSES = ['Submitted', 'Checked', 'Approved'];
+const cashbookExpenditureCounts = (r) => !r.status || ['Submitted', 'Approved'].includes(r.status);
+// Week of the month for a date: the 1st Sunday is Week 1, the 2nd Sunday Week 2, and so on (never more than 5).
+const weekOfMonth = (iso) => { const d = Number(String(iso || '').slice(8, 10)); return d ? Math.min(5, Math.ceil(d / 7)) : 1; };
+// The most recent Sunday on or before today (weekly reports are dated on Sundays).
+const latestSunday = () => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); const m = d.getMonth() + 1, day = d.getDate(); return `${d.getFullYear()}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`; };
 const OFFERING_CATEGORIES = ['Main Offering', 'Project Offering', "Children's Offering", 'First Fruit', 'Weekday Offering', 'Donation', 'Thanksgiving', 'Pledges'];
 const HEADCOUNT_CATEGORIES = ['Children Boys', 'Children Girls', 'Youth Boys', 'Youth Girls', 'Adult Men', 'Adult Women'];
 const headcountLabel = (cat) => cat.replace('Youth Boys', 'Omega Boys').replace('Youth Girls', 'Omega Girls');
@@ -2820,7 +2828,7 @@ export function FinanceCenter() {
 function FinanceCenterScreen() {
   const { data, save, remove } = useData();
   const { role, profile, hasPermission } = useAuth();
-  const canReviewFinance = hasPermission('finance_reviewer.approve');
+  const canReviewFinance = hasPermission('finance_reviewer.approve') && role !== 'super_admin';
   const isPastor = role === 'pastor';
   const canPrepareFinance = hasPermission('finance.manage') && !isPastor && !canReviewFinance;
 
@@ -2828,8 +2836,8 @@ function FinanceCenterScreen() {
   const CATS = OFFERING_CATEGORIES;
   const STANDARD_CATS = CATS.filter(c=>c!=='Weekday Offering');
   const [tab,setTab] = useState('weekly');
-  const [date,setDate] = useState(today());
-  const [weekNo,setWeekNo] = useState(1);
+  const [date,setDate] = useState(latestSunday());
+  const weekNo = weekOfMonth(date);
   const [year,setYear] = useState(new Date().getFullYear());
   const [month,setMonth] = useState(new Date().getMonth()+1);
   const [counts,setCounts] = useState({});
@@ -2857,7 +2865,7 @@ function FinanceCenterScreen() {
   });
 
   const loadReport = () => {
-    const r = reports.find(x => x.date === date && Number(x.week_no) === Number(weekNo));
+    const r = reports.find(x => x.date === date && Number(x.week_no) === Number(weekNo)) || reports.find(x => x.date === date);
     const rid=r?.id || '';
     setReport(r || null); setReportId(rid); setNotes(r?.notes || ''); setCheckedBy(r?.checked_by_name || ''); setApprovedBy(r?.approved_by_name || ''); setStatus(r?.status || 'Draft');
     const c={}; cashRows.filter(x=>x.report_id===rid && x.category!=='Weekday Offering').forEach(x=>{ c[`${x.category}|${x.denomination}`]=Number(x.quantity||0); });
@@ -2872,6 +2880,9 @@ function FinanceCenterScreen() {
       return {id:x.id,collection_date:x.collection_date||date,notes:x.notes||'',counts:wc,momo:wm?.amount!=null?Number(wm.amount):'',provider:wm?.provider||'',reference:wm?.reference||''};
     }));
   };
+  const awaitingReview = reports.filter(r=>r.status==='Submitted').sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const autoOpened = useRef(false);
+  useEffect(()=>{ if(!autoOpened.current && canReviewFinance && awaitingReview.length){ autoOpened.current=true; if(!reports.some(r=>r.date===date && r.status==='Submitted')) setDate(awaitingReview[0].date); } },[awaitingReview.length,canReviewFinance]);
   useEffect(()=>{ if(tab==='weekly') loadReport(); },[date,weekNo,reports.length,cashRows.length,momoRows.length,weekdayRows.length,weekdayCashRows.length,weekdayMomoRows.length,tab]);
 
   const cashTotal = (cat) => DENOMS.reduce((s,d)=>s + d*Number(counts[`${cat}|${d}`]||0),0);
@@ -2898,6 +2909,25 @@ function FinanceCenterScreen() {
     save('finance_weekly_reports', next); setReport(next); setStatus(nextStatus);
     setMsg(`Week ${weekNo} ${nextStatus.toLowerCase()}.`);
   };
+
+  const withdrawWeekly = () => {
+    if (!report || report.status !== 'Submitted') return;
+    if (!confirm(`Withdraw Week ${weekNo}? It goes back to Draft so you can correct it. Submit it again when it is ready.`)) return;
+    transitionWeekly('Draft', { review_reason: null });
+  };
+  const reviewButtons = (canReviewFinance && report?.status==='Submitted') ? (<><button className="primary" onClick={()=>transitionWeekly('Approved',{approved_by_name:profile?.full_name||'Finance Reviewer',approved_at:new Date().toISOString(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString(),review_reason:null})}>Approve &amp; Lock</button><button className="secondary" onClick={()=>{const reason=window.prompt('Explain what must be corrected before resubmission:');if(reason&&reason.trim())transitionWeekly('Returned',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Return for correction</button><button className="secondary" onClick={()=>{const reason=window.prompt('Reason for rejecting this report:');if(reason&&reason.trim())transitionWeekly('Rejected',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Reject</button></>) : null;
+  const statusNote = report && !['Draft','Reopened','Returned'].includes(report.status) ? (
+    <div className="panel" style={{borderLeft:'4px solid #1f6fb2'}}>
+      {report.status==='Submitted' && canReviewFinance && <><b>Week {weekNo} is waiting for your review.</b> Check the figures below, then approve, return or reject.<div className="toolbar" style={{marginTop:8}}>{reviewButtons}</div></>}
+      {report.status==='Submitted' && !canReviewFinance && <><b>Week {weekNo} is submitted.</b> It is locked while the Finance Reviewer checks it, so there is nothing more to click here until it is approved or returned. If you notice a mistake before then, click <b>Withdraw submission</b> to take it back for editing.<br/><span className="muted">If your church has no Finance Reviewer yet, ask the Super Admin to create one under Users.</span></>}
+      {report.status==='Approved' && <><b>Week {weekNo} is approved and locked.</b> Only the Pastor can authorise reopening it, with a reason.</>}
+      {report.status==='Rejected' && <><b>Week {weekNo} was rejected.</b> {report.review_reason ? `Reason: ${report.review_reason}. ` : ''}Only the Pastor can authorise reopening it.</>}
+      {!['Submitted','Approved','Rejected'].includes(report.status) && <><b>Week {weekNo} is {report.status}.</b> It is locked for editing.</>}
+    </div>
+  ) : null;
+  const draftNote = report && ['Draft','Reopened','Returned'].includes(report.status) && canPrepareFinance ? (
+    <div className="panel" style={{borderLeft:'4px solid #d9822b'}}><b>Week {weekNo} is {report.status==='Draft'?'a Draft':report.status}.</b> You can keep editing and saving it. It stays out of the Deposit Slip until you submit it for review.{report.status==='Returned'&&report.review_reason?<><br/>Reviewer note: {report.review_reason}</>:null}</div>
+  ) : null;
 
   const saveWeekly = (nextStatus=status, extra={}) => {
     if (report && !['Draft','Reopened','Returned'].includes(report.status)) { setMsg('This report is locked. Only the Pastor can authorise reopening it.'); return; }
@@ -2976,7 +3006,8 @@ function FinanceCenterScreen() {
     <div className="top"><div><h1>Church Finance</h1><div className="muted">Weekly cash-counting workflow based on the church finance workbook. Attendance remains in the Attendance module.</div></div></div>
     <div className="toolbar" style={{marginBottom:12}}><button className={tab==='weekly'?'primary':''} onClick={()=>setTab('weekly')}>Weekly Cash Report</button><button className={tab==='monthly'?'primary':''} onClick={()=>setTab('monthly')}>Monthly</button><button className={tab==='quarterly'?'primary':''} onClick={()=>setTab('quarterly')}>Quarterly</button><button className={tab==='yearly'?'primary':''} onClick={()=>setTab('yearly')}>Yearly</button><button className={tab==='firstfruit'?'primary':''} onClick={()=>setTab('firstfruit')}>First Fruit Register</button><button className={tab==='receipts'?'primary':''} onClick={()=>setTab('receipts')}>Digital Receipts</button></div>
     {tab==='weekly' && <>
-      <div className="panel finance-header-panel"><div className="formgrid finance-header-grid"><div><label>Report date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><div><label>Week number</label><select value={weekNo} onChange={e=>setWeekNo(Number(e.target.value))}>{[1,2,3,4,5].map(n=><option key={n} value={n}>Week {n}</option>)}</select></div><div><label>Workflow status</label><input value={report?.status || 'Draft'} readOnly />{report?.review_reason&&<small className="muted">Reviewer note: {report.review_reason}</small>}{report?.reopen_reason&&<small className="muted"> Reopen reason: {report.reopen_reason}</small>}</div></div></div>
+      {awaitingReview.length>0 && <div className="panel" style={{borderLeft:'4px solid #1f6fb2'}}><h2 style={{marginTop:0}}>Reports awaiting review ({awaitingReview.length})</h2>{awaitingReview.map(r=><p key={r.id} style={{margin:'6px 0'}}><b>{r.date}</b> · Week {r.week_no} · {money(r.grand_total)}{r.prepared_by_name?` · prepared by ${r.prepared_by_name}`:''} <button className="secondary" onClick={()=>{setDate(r.date);setTab('weekly');window.scrollTo({top:0,behavior:'smooth'});}}>{r.date===date?'Showing':'Open'}</button></p>)}</div>}
+      <div className="panel finance-header-panel"><div className="formgrid finance-header-grid"><div><label>Report date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} /></div><div><label>Week number (automatic)</label><input value={`Week ${weekNo} of ${new Date(date+'T00:00:00').toLocaleString('en-GB',{month:'long'})}`} readOnly />{new Date(date+'T00:00:00').getDay()!==0&&<small className="muted">This date is not a Sunday. Weekly reports are normally dated on a Sunday.</small>}</div><div><label>Workflow status</label><input value={report?.status || 'Draft'} readOnly />{report?.review_reason&&<small className="muted">Reviewer note: {report.review_reason}</small>}{report?.reopen_reason&&<small className="muted"> Reopen reason: {report.reopen_reason}</small>}</div></div></div>
       <fieldset disabled={!canPrepareFinance || (!!report && !['Draft','Reopened','Returned'].includes(report.status))} style={{border:0,padding:0,margin:0,minWidth:0}}><div className="panel finance-header-panel"><div className="formgrid finance-header-grid"><div><label>Checked by</label><input value={checkedBy} onChange={e=>setCheckedBy(e.target.value)} /></div><div><label>Approval recorded by Finance Reviewer</label><input value={approvedBy} onChange={e=>setApprovedBy(e.target.value)} readOnly={!canPrepareFinance} /></div><div><label>Notes</label><input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional notes" /></div></div></div>
       <div className="finance-offering-grid">{STANDARD_CATS.map((cat,catIndex)=><div className={`finance-offering-card finance-offering-${catIndex%4}`} key={cat}>
         <div className="finance-offering-head"><div><h2>{cat}</h2><span>Enter cash quantities below</span></div><strong>{money(categoryTotal(cat))}</strong></div>
@@ -2997,7 +3028,7 @@ function FinanceCenterScreen() {
       </div>
 
       <div className="cards"><div className="card"><div className="label">Total cash</div><div className="num">{money(totalCash)}</div></div><div className="card"><div className="label">Total MoMo</div><div className="num">{money(totalMomo)}</div></div><div className="card"><div className="label">Weekly total</div><div className="num" style={{fontSize:22}}>{money(grandTotal)}</div></div></div>
-      </fieldset><div className="toolbar">{canPrepareFinance && (!report || ['Draft','Reopened','Returned'].includes(report.status)) && <><button className="secondary" onClick={()=>saveWeekly('Draft')}>Save Draft</button><button className="primary" onClick={()=>saveWeekly('Submitted',{review_reason:null})}>Submit for review</button></>}{canReviewFinance && report?.status==='Submitted' && <><button className="primary" onClick={()=>transitionWeekly('Approved',{approved_by_name:profile?.full_name||'Finance Reviewer',approved_at:new Date().toISOString(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString(),review_reason:null})}>Approve &amp; Lock</button><button className="secondary" onClick={()=>{const reason=window.prompt('Explain what must be corrected before resubmission:');if(reason&&reason.trim())transitionWeekly('Returned',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Return for correction</button><button className="secondary" onClick={()=>{const reason=window.prompt('Reason for rejecting this report:');if(reason&&reason.trim())transitionWeekly('Rejected',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Reject</button></>}{role==='pastor' && ['Approved','Rejected'].includes(report?.status) && <button className="secondary" onClick={()=>{const reason=window.prompt('Why must this locked report be reopened?');if(reason&&reason.trim())transitionWeekly('Reopened',{reopen_reason:reason.trim(),reopened_by_name:profile?.full_name||'Pastor',reopened_at:new Date().toISOString()});}}>Authorise Reopening</button>}{msg&&<span className="muted">{msg}</span>}</div>
+      </fieldset>{statusNote}{draftNote}<div className="toolbar">{canPrepareFinance && report?.status==='Submitted' && <button className="secondary" onClick={withdrawWeekly}>Withdraw submission</button>}{canPrepareFinance && (!report || ['Draft','Reopened','Returned'].includes(report.status)) && <><button className="secondary" onClick={()=>saveWeekly('Draft')}>Save Draft</button><button className="primary" onClick={()=>saveWeekly('Submitted',{review_reason:null})}>Submit for review</button></>}{reviewButtons}{role==='pastor' && ['Approved','Rejected'].includes(report?.status) && <button className="secondary" onClick={()=>{const reason=window.prompt('Why must this locked report be reopened?');if(reason&&reason.trim())transitionWeekly('Reopened',{reopen_reason:reason.trim(),reopened_by_name:profile?.full_name||'Pastor',reopened_at:new Date().toISOString()});}}>Authorise Reopening</button>}{msg&&<span className="muted">{msg}</span>}</div>
     </>}
     {tab==='monthly' && <><div className="panel"><div className="fld"><small>Year</small><input type="number" value={year} onChange={e=>setYear(Number(e.target.value)||year)} /></div></div><SummaryTable rows={monthRows} title={`Monthly Finance Summary · ${year}`} /></>}
     {tab==='quarterly' && <><div className="panel"><div className="fld"><small>Year</small><input type="number" value={year} onChange={e=>setYear(Number(e.target.value)||year)} /></div></div><SummaryTable rows={quarterRows} title={`Quarterly Finance Summary · ${year}`} /></>}
@@ -3395,7 +3426,7 @@ export function Cashbook() {
 
     // One receipt per weekly Finance Center report, dated on the report date (Sunday).
     // Weekday collections are included in this total, not shown as separate receipts.
-    const financeRows = reports.map(r => {
+    const financeRows = reports.filter(r => CASHBOOK_REPORT_STATUSES.includes(r.status)).map(r => {
       const weeklyCash = cashRows
         .filter(x => x.report_id === r.id && x.category !== 'Weekday Offering')
         .reduce((sum, x) => sum + Number(x.denomination || 0) * Number(x.quantity || 0), 0);
@@ -3434,7 +3465,7 @@ export function Cashbook() {
       };
     }).filter(r => r.entry_date && r.amount > 0);
 
-    const expenditureRows = [...(data.expenditures || [])].map(r => ({
+    const expenditureRows = [...(data.expenditures || [])].filter(cashbookExpenditureCounts).map(r => ({
       id: `expenditure-${r.id}`,
       entry_date: String(r.date || '').slice(0, 10),
       entry_type: 'Payment',
@@ -3476,6 +3507,8 @@ export function Cashbook() {
     data.expenditures
   ]);
 
+  const heldBackReceipts = (data.finance_weekly_reports || []).filter(r => !CASHBOOK_REPORT_STATUSES.includes(r.status)).length;
+  const heldBackPayments = (data.expenditures || []).filter(r => !cashbookExpenditureCounts(r)).length;
   // The date range decides the totals. The search box only narrows the list, never the balance.
   const inRange = useMemo(() => ledger
     .filter(r => !fromDate || String(r.entry_date || '') >= fromDate)
@@ -3557,7 +3590,9 @@ export function Cashbook() {
           <div className="muted">
             Record and review church cash receipts and payments.
             Finance Center weekly collections feed receipts, including weekday collections under the Sunday date. Expenditure feeds payments automatically.
+            Only records that have been submitted for review are counted; drafts stay out until they are submitted.
           </div>
+          {(heldBackReceipts + heldBackPayments) > 0 && <div className="muted" style={{marginTop:6}}>Not counted yet: {heldBackReceipts} weekly report{heldBackReceipts===1?'':'s'} and {heldBackPayments} expenditure record{heldBackPayments===1?'':'s'} still in draft (or returned, reopened or rejected).</div>}
         </div>
       </div>
 

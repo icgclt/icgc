@@ -84,8 +84,11 @@ export function DepositSlip() {
   const canManage = can(role, 'offering_deposits', 'write');
   const isPastor = role === 'pastor';
 
+  // Only reports that have been submitted for review appear here. A Draft (or Returned / Reopened / Rejected)
+  // report stays out, unless a slip was already saved for it.
   const reports = useMemo(() => [...(data.finance_weekly_reports || [])]
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.week_no || 0) - (a.week_no || 0)), [data.finance_weekly_reports]);
+    .filter((r) => ['Submitted', 'Checked', 'Approved'].includes(r.status) || (data.offering_deposits || []).some((d) => d.report_id === r.id))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.week_no || 0) - (a.week_no || 0)), [data.finance_weekly_reports, data.offering_deposits]);
   const deposits = data.offering_deposits || [];
   const settings = (data.bank_deposit_settings || [])[0];
 
@@ -259,7 +262,7 @@ export function DepositSlip() {
       </>}
     </div>
 
-    {!report ? <div className="panel empty">No weekly offering reports yet. Record one under Finance → Finance Center first.</div> : <>
+    {!report ? <div className="panel empty">No submitted weekly offering reports yet. A report appears here once it has been submitted for review in Finance → Finance Center. Drafts are not shown.</div> : <>
       <div className="cards">
         <div className="card"><span className="label">Cash counted</span><strong>{gh(cashCounted)}</strong></div>
         <div className="card"><span className="label">Mobile Money (report)</span><strong>{gh(momoTotal)}</strong></div>
