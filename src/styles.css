@@ -217,10 +217,10 @@ button.danger:disabled { opacity: .55; cursor: not-allowed; }
 .ff-summary strong{display:block;font-size:1.6rem;margin:2px 0}
 .ff-legend{display:flex;gap:8px;margin-left:auto}
 .ff-key{font-size:12px;font-weight:700;color:#fff;border-radius:999px;padding:3px 12px}
-.ff-key.paid{background:#15803d}.ff-key.unpaid{background:#b91c1c}
+.ff-key.paid{background:#15803d}.ff-key.unpaid{background:#b91c1c}.ff-key.upcoming{background:#6b7280}
 .ffgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 .fftile{border-radius:12px;padding:14px 8px;text-align:center;color:#fff;min-height:128px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
-.fftile.paid{background:#15803d}.fftile.unpaid{background:#b91c1c}
+.fftile.paid{background:#15803d}.fftile.unpaid{background:#b91c1c}.fftile.upcoming{background:#e5e7eb;color:#4b5563}.fftile.upcoming .ffstatus{background:rgba(75,85,99,.15)}
 .ffmonth{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .ffcur{font-size:12px;font-weight:600;opacity:.9;margin-top:4px}
 .ffamt{font-size:1.45rem;font-weight:800;line-height:1.15;word-break:break-word}
