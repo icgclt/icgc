@@ -36,7 +36,14 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser()
     if (!user) throw new Error('You must be signed in.')
     const { data: caller } = await userClient.from('profiles').select('role').eq('id', user.id).maybeSingle()
-    if (!caller || !['super_admin', 'admin', 'secretary'].includes(caller.role)) throw new Error('Only Super Admin, administrators and secretaries can create member portal accounts.')
+    let callerOk = !!caller && ['super_admin', 'admin', 'secretary'].includes(caller.role)
+    if (!callerOk && caller?.role) {
+      // A group that is allowed to edit members (Role Permissions) may also create member portal logins.
+      const svc = createClient(url, service)
+      const { data: pr } = await svc.from('role_permissions').select('enabled, app_permissions!inner(permission_key)').eq('role', caller.role).eq('enabled', true).eq('app_permissions.permission_key', 'members.edit').limit(1)
+      callerOk = !!(pr && pr.length)
+    }
+    if (!callerOk) throw new Error('Only Super Admin, administrators, secretaries and groups allowed to edit members can create member portal accounts.')
 
     const { member_id } = await req.json()
     if (!member_id) throw new Error('member_id is required.')

@@ -19,6 +19,13 @@ function normalizePhone(value: unknown) {
   return s
 }
 
+// A group may also be allowed by ticking Notifications -> Manage under Role Permissions.
+async function roleHasPermission(role: string | undefined, key: string) {
+  if (!role) return false
+  const { data } = await admin.from('role_permissions').select('enabled, app_permissions!inner(permission_key)').eq('role', role).eq('enabled', true).eq('app_permissions.permission_key', key).limit(1)
+  return !!(data && data.length)
+}
+
 async function callerAllowed(req: Request) {
   const supplied = req.headers.get('x-cron-secret') || ''
   if (CRON_SECRET && supplied && supplied === CRON_SECRET) return true
@@ -28,7 +35,8 @@ async function callerAllowed(req: Request) {
   const { data: { user } } = await client.auth.getUser()
   if (!user) return false
   const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).maybeSingle()
-  return ['super_admin', 'admin', 'secretary'].includes(profile?.role)
+  if (['super_admin', 'admin', 'secretary'].includes(profile?.role)) return true
+  return await roleHasPermission(profile?.role, 'notifications.manage')
 }
 
 async function sendSms(row: any) {
