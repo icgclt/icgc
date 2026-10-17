@@ -79,8 +79,8 @@ function printSlip(v) {
 // ---------------------------------------------------------------- main screen
 export function DepositSlip() {
   const { data, save, remove } = useData();
-  const { role, profile } = useAuth();
-  const allowed = ['super_admin', 'admin', 'finance', 'finance_reviewer', 'pastor'].includes(role);
+  const { role, profile, hasPermission } = useAuth();
+  const allowed = ['super_admin', 'admin', 'finance', 'finance_reviewer', 'pastor'].includes(role) || hasPermission('finance.view');
   const canManage = can(role, 'offering_deposits', 'write');
   const isPastor = role === 'pastor';
 

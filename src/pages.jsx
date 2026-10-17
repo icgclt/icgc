@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, can, ROLES, isAdmin, isSuperAdmin } from './auth';
 import { useData } from './data';
 import BackupPanel from './BackupPanel';
+import MemberPicker from './MemberPicker';
 import { DepositAlerts } from './deposit';
 import { supabase } from './supabase';
 import Crud, { StoragePhoto } from './Crud';
@@ -1254,7 +1255,7 @@ function ContributionsGrid({ fund, roster, title }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [q, setQ] = useState('');
   const [edits, setEdits] = useState({});
-  const [memberId, setMemberId] = useState(roster[0]?.id || '');
+  const [memberId, setMemberId] = useState('');
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [amount, setAmount] = useState('');
 
@@ -1267,7 +1268,7 @@ function ContributionsGrid({ fund, roster, title }) {
   }, [data.member_contributions, fund, year]);
 
   useEffect(() => { setEdits({}); }, [year, fund]);
-  useEffect(() => { if (!roster.some(m => m.id === memberId)) setMemberId(roster[0]?.id || ''); }, [roster, memberId]);
+  useEffect(() => { if (memberId && !roster.some(m => m.id === memberId)) setMemberId(''); }, [roster, memberId]);
 
   const shown = roster.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()) || String(m.member_code || '').toLowerCase().includes(q.trim().toLowerCase()));
   const valueFor = (name, mth) => {
@@ -1293,6 +1294,7 @@ function ContributionsGrid({ fund, roster, title }) {
       year: Number(year), month: Number(month), amount: n,
     });
     setAmount('');
+    setMemberId('');
     alert(`${fund} payment recorded for ${member.name} for ${MONTHS[month - 1]} ${year}.`);
   };
 
@@ -1324,11 +1326,12 @@ function ContributionsGrid({ fund, roster, title }) {
       <div className="panel">
         <h2>Add payment</h2>
         <div className="formgrid">
-          <div><label>Member</label><select value={memberId} onChange={e => setMemberId(e.target.value)}><option value="">Select member</option>{roster.map(m => <option key={m.id} value={m.id}>{m.name}{m.member_code ? ` · ${m.member_code}` : ''}</option>)}</select></div>
+          <div><label>Member (search by name, ID or phone)</label><MemberPicker roster={roster} value={memberId} onChange={setMemberId} /></div>
           <div><label>Year</label><input type="number" value={year} onChange={e => setYear(Number(e.target.value) || year)} /></div>
           <div><label>Month paid</label><select value={month} onChange={e => setMonth(Number(e.target.value))}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
           <div><label>Amount (GHS)</label><input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
         </div>
+        {memberId && existing.get((roster.find(m => m.id === memberId)?.name || '') + '|' + month) && <p className="muted sm" style={{ marginTop: 8 }}>Already recorded for {MONTHS[month - 1]} {year}: <b>{money(existing.get(roster.find(m => m.id === memberId).name + '|' + month).amount)}</b>. Saving will replace it.</p>}
         <button className="primary" style={{ marginTop: 12 }} onClick={saveEntry}>Record {fund} payment</button>
         <p className="muted sm">The payment is recorded against the month selected above. For example, a payment made for March is recorded under March.</p>
       </div>
@@ -2820,8 +2823,9 @@ export function OmegaCheckIn() { return <QuickAttendanceList memberType="Omega" 
 
 /* ---------------- Major Modules V11 ---------------- */
 export function FinanceCenter() {
-  const { role } = useAuth();
-  if (!['admin','finance','finance_reviewer','pastor'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Center</h2><p className="muted">Finance access is restricted.</p></div>;
+  const { role, hasPermission } = useAuth();
+  // Open for anyone whose group has Finance -> View ticked (the old role names still work too).
+  if (!hasPermission('finance.view') && !['admin','finance','finance_reviewer','pastor'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Center</h2><p className="muted">Finance access is restricted.</p></div>;
   return <FinanceCenterScreen />;
 }
 
@@ -3055,12 +3059,11 @@ export function Expenditure() {
 
 function ExpenditureScreen() {
   const { data, save, remove } = useData();
-  const { hasPermission, profile } = useAuth();
+  const { hasPermission, role, profile } = useAuth();
 
-  // Access comes only from Role Permissions: Manage Expenditure (enter/edit/submit), Review & Approve, Authorise Reopening.
-  const canReviewFinance = hasPermission('finance_reviewer.approve');
-  const canWrite = hasPermission('expenditure.manage');
-  const canReopen = hasPermission('expenditure.reopen');
+  const canReviewFinance = hasPermission('finance_reviewer.approve') && role !== 'super_admin';
+  const canWrite = hasPermission('expenditure.manage') && role !== 'pastor' && !canReviewFinance;
+  const isPastor = role === 'pastor';
 
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState('');
@@ -3166,7 +3169,7 @@ function ExpenditureScreen() {
   }
 
   function changeExpenditureStatus(row, nextStatus, extra={}) {
-    if (nextStatus === 'Reopened' && !canReopen) return;
+    if (nextStatus === 'Reopened' && !isPastor) return;
     if (['Approved','Returned','Rejected'].includes(nextStatus) && !canReviewFinance) return;
     if (['Returned','Rejected'].includes(nextStatus) && !String(extra.review_reason||'').trim()) { setStatus('A reason is required to return or reject a record.'); return; }
     if (nextStatus === 'Submitted' && !canWrite) return;
@@ -3197,7 +3200,7 @@ function ExpenditureScreen() {
         </div>
       </div>
 
-      {!canWrite && <div className="panel" style={{borderLeft:'4px solid #1f6fb2'}}>You can view expenditure but not add it. To allow this, a Super Admin can tick “Manage Expenditure” for your group under Role Permissions.</div>}
+      {!canWrite && <div className="panel" style={{borderLeft:'4px solid #1f6fb2'}}>{role==='pastor' ? 'The Pastor can view expenditure and authorise reopening, but does not enter it.' : canReviewFinance ? 'As Finance Reviewer you review submitted expenditure below. Entering expenditure is done by Finance or an Administrator.' : 'You can view expenditure but not add it. Ask a Super Admin to tick Manage Expenditure for your role under Role Permissions.'}</div>}
       {canWrite && (
         <div className="panel">
           <div className="toolbar">
@@ -3363,7 +3366,7 @@ function ExpenditureScreen() {
                   <th>Method</th>
                   <th>Payment</th>
                   <th>Status</th>
-                  {(canWrite || canReopen || canReviewFinance) && <th>Actions</th>}
+                  {(canWrite || isPastor || canReviewFinance) && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -3378,9 +3381,9 @@ function ExpenditureScreen() {
                     <td>{row.payment_method || '—'}</td>
                     <td><b>{money(Number(row.amount || 0))}</b></td>
                     <td>{row.status || 'Draft'}{row.review_reason&&<div className="muted sm">Review note: {row.review_reason}</div>}</td>
-                    {(canWrite || canReopen || canReviewFinance) && (
+                    {(canWrite || isPastor || canReviewFinance) && (
                       <td>
-                        {canWrite && (!row.status || ['Draft','Reopened','Returned'].includes(row.status)) && <><button className="secondary" onClick={() => editRow(row)}>Edit</button>{' '}<button className="secondary" onClick={() => deleteExpenditure(row)}>Delete</button>{' '}<button className="primary" onClick={() => changeExpenditureStatus(row,'Submitted',{review_reason:null,reviewed_by_name:null,reviewed_at:null})}>Submit</button></>}{row.status==='Submitted' && <span className="muted">Awaiting Finance Reviewer</span>}{canReviewFinance && row.status==='Submitted' && <><button className="primary" onClick={() => changeExpenditureStatus(row,'Approved')}>Approve &amp; Lock</button>{' '}<button className="secondary" onClick={() => {const reason=window.prompt('Explain what must be corrected:');if(reason&&reason.trim())changeExpenditureStatus(row,'Returned',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Return</button>{' '}<button className="secondary" onClick={() => {const reason=window.prompt('Reason for rejection:');if(reason&&reason.trim())changeExpenditureStatus(row,'Rejected',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Reject</button></>}{canReopen && ['Approved','Rejected'].includes(row.status) && <button className="secondary" onClick={() => {const reason=window.prompt('Why must this locked expenditure be reopened?');if(reason&&reason.trim())changeExpenditureStatus(row,'Reopened',{reopen_reason:reason.trim(),reopened_by_name:profile?.full_name||'Pastor',reopened_at:new Date().toISOString()});}}>Authorise Reopening</button>}
+                        {canWrite && (!row.status || ['Draft','Reopened','Returned'].includes(row.status)) && <><button className="secondary" onClick={() => editRow(row)}>Edit</button>{' '}<button className="secondary" onClick={() => deleteExpenditure(row)}>Delete</button>{' '}<button className="primary" onClick={() => changeExpenditureStatus(row,'Submitted',{review_reason:null,reviewed_by_name:null,reviewed_at:null})}>Submit</button></>}{row.status==='Submitted' && <span className="muted">Awaiting Finance Reviewer</span>}{canReviewFinance && row.status==='Submitted' && <><button className="primary" onClick={() => changeExpenditureStatus(row,'Approved')}>Approve &amp; Lock</button>{' '}<button className="secondary" onClick={() => {const reason=window.prompt('Explain what must be corrected:');if(reason&&reason.trim())changeExpenditureStatus(row,'Returned',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Return</button>{' '}<button className="secondary" onClick={() => {const reason=window.prompt('Reason for rejection:');if(reason&&reason.trim())changeExpenditureStatus(row,'Rejected',{review_reason:reason.trim(),reviewed_by_name:profile?.full_name||'Finance Reviewer',reviewed_at:new Date().toISOString()});}}>Reject</button></>}{isPastor && ['Approved','Rejected'].includes(row.status) && <button className="secondary" onClick={() => {const reason=window.prompt('Why must this locked expenditure be reopened?');if(reason&&reason.trim())changeExpenditureStatus(row,'Reopened',{reopen_reason:reason.trim(),reopened_by_name:profile?.full_name||'Pastor',reopened_at:new Date().toISOString()});}}>Authorise Reopening</button>}
                       </td>
                     )}
                   </tr>
@@ -3398,8 +3401,11 @@ function ExpenditureScreen() {
 /* ---------------- Church Cashbook ---------------- */
 export function Cashbook() {
   const { data, save, remove } = useData();
-  const { role } = useAuth();
-  const canWrite = ['admin','finance','secretary'].includes(role) || isSuperAdmin(role);
+  const { role, hasPermission } = useAuth();
+  // Writing follows Finance -> Manage, but never for people who approve or the Pastor (separation of duties).
+  const permWrite = hasPermission('finance.manage') && role !== 'pastor' && role !== 'finance_reviewer' && !hasPermission('finance_reviewer.approve');
+  const permView = hasPermission('finance.view') || hasPermission('finance.manage');
+  const canWrite = ['admin','finance','secretary'].includes(role) || isSuperAdmin(role) || permWrite;
   const canDelete = role === 'admin' || isSuperAdmin(role);
 
   const [type, setType] = useState('Receipt');
@@ -3573,7 +3579,7 @@ export function Cashbook() {
     setStatus(`Opening Balance for ${year} saved.`);
     setAmount('');
   }
-  if (!canWrite && role !== 'viewer') {
+  if (!canWrite && role !== 'viewer' && !permView) {
     return (
       <div className="panel">
         <h2>Church Cashbook</h2>
@@ -4082,8 +4088,8 @@ function PastorDashboardScreen({ onNavigate }) {
 /* ---------------- V12 Member Giving + Engagement Automation ---------------- */
 export function MemberGiving() {
   const { data } = useData();
-  const { role } = useAuth();
-  if (!['admin','finance','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
+  const { role, hasPermission } = useAuth();
+  if (!hasPermission('finance.view') && !['admin','finance','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Member Giving & Receipts</h2><p className="muted">Finance access is restricted.</p></div>;
   const rows=[...(data.payment_receipts||[])].sort((a,b)=>String(b.paid_at||b.created_at).localeCompare(String(a.paid_at||a.created_at)));
   const paid=rows.filter(r=>r.status==='Paid').reduce((a,r)=>a+Number(r.amount||0),0);
   const pending=rows.filter(r=>r.status==='Pending').reduce((a,r)=>a+Number(r.amount||0),0);
@@ -4128,8 +4134,8 @@ export function EngagementAutomation() {
 
 /* ---------------- V13 Finance Reconciliation + Engagement ---------------- */
 export function FinanceReconciliation() {
-  const { role } = useAuth();
-  if (!['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
+  const { role, hasPermission } = useAuth();
+  if (!hasPermission('finance_reconciliation.view') && !['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
   return <FinanceReconciliationScreen />;
 }
 
