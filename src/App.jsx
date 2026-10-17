@@ -272,7 +272,6 @@ const CURRENT_PERMISSION_CATALOG = [
   ['finance.manage','finance','manage','Manage Finance','Create, edit and manage Finance Center records'],
   ['expenditure.view','expenditure','view','View Expenditure','View expenditure records and payment vouchers'],
   ['expenditure.manage','expenditure','manage','Manage Expenditure','Prepare, edit, delete and submit draft expenditure. Approval is a separate permission.'],
-  ['expenditure.reopen','expenditure','reopen','Authorise Reopening of Expenditure','Reopen approved, rejected or submitted expenditure, with a reason. Tick this for whichever group should authorise reopening (for example the Pastor).'],
   ['finance_reviewer.approve','finance_reviewer','approve','Review & Approve Financial Records','Review submitted reports and expenditure; approve, return or reject records. This does not authorize reopening locked records.'],
   ['finance_reconciliation.view','finance_reconciliation','view','View Reconciliation','Access financial reconciliation'],
   ['finance_reconciliation.manage','finance_reconciliation','manage','Manage Reconciliation','Perform financial checking and reconciliation'],
@@ -292,6 +291,40 @@ const CURRENT_PERMISSION_CATALOG = [
   ['clear_test_data.manage','clear_test_data','manage','Clear Test Data','Delete test/demo data'],
 ];
 
+// ---- Sub-tab permission inheritance -------------------------------------------------
+// Granting (or removing) a permission for one sub tab applies to every other sub tab under the same
+// sidebar tab. The sub-tab lists are read from NAV above, so they never go out of date.
+// Never inherited: Pastor-only tabs (Prayer, Pastoral Care), and the sensitive actions
+// Approve / Reopen / Send SMS, which must always be ticked on purpose.
+function navTabModules() {
+  const moduleOf = new Map(CURRENT_PERMISSION_CATALOG.map(([k, m]) => [k, m]));
+  return NAV.filter((n) => !Array.isArray(n)).map((n) => ({
+    label: n.label.replace(/^\S+\s+/, ''),
+    modules: [...new Set(n.items
+      .filter(([id, , , need]) => need && !PASTOR_ONLY.has(id))
+      .map(([, , , need]) => moduleOf.get(need))
+      .filter(Boolean))],
+  }));
+}
+
+function inheritedPermissionKeys(key) {
+  const me = CURRENT_PERMISSION_CATALOG.find((c) => c[0] === key);
+  if (!me) return [];
+  const [, module, action] = me;
+  const kind = action === 'view' ? 'view' : (['manage', 'record', 'edit'].includes(action) ? 'write' : null);
+  if (!kind) return [];
+  const out = new Set();
+  navTabModules().filter((t) => t.modules.includes(module)).forEach((t) => t.modules.forEach((m) => {
+    if (m === module) return;
+    const perms = CURRENT_PERMISSION_CATALOG.filter((c) => c[1] === m);
+    if (kind === 'view') { perms.filter((c) => c[2] === 'view').forEach((c) => out.add(c[0])); return; }
+    const manage = perms.find((c) => c[2] === 'manage');
+    if (manage) out.add(manage[0]);
+    else perms.filter((c) => ['record', 'edit'].includes(c[2])).forEach((c) => out.add(c[0]));
+  }));
+  return [...out];
+}
+
 function PermissionManager() {
   const { role, hasPermission } = useAuth();
   const [roles, setRoles] = useState(ROLES.filter((r) => r !== 'pending'));
@@ -307,6 +340,8 @@ function PermissionManager() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
+  const [inherit, setInherit] = useState(true);
+  const [inheritNote, setInheritNote] = useState('');
 
   const load = async (keepMsg = false) => {
     setLoading(true); if (!keepMsg) setMsg(''); setError('');
@@ -352,7 +387,35 @@ function PermissionManager() {
     return Object.fromEntries(MODULE_ORDER.filter(m=>out[m]?.length).map(m=>[m,out[m]]));
   }, [permissions]);
 
-  const togglePermission = (key) => { setEnabled(current => ({...current,[key]:!current[key]})); setMsg(''); };
+  const labelOf = (key) => (CURRENT_PERMISSION_CATALOG.find(c => c[0] === key) || [])[3] || key;
+
+  const togglePermission = (key) => {
+    const on = !enabled[key];
+    const next = { ...enabled, [key]: on };
+    const changed = [], skipped = [];
+    if (inherit) inheritedPermissionKeys(key).forEach(k => {
+      // Separation of duties: a group that approves financial records can never enter expenditure.
+      if (on && k === 'expenditure.manage' && enabled['finance_reviewer.approve']) { skipped.push(k); return; }
+      if (!!next[k] !== on) changed.push(k);
+      next[k] = on;
+    });
+    setEnabled(next); setMsg('');
+    setInheritNote(
+      (changed.length ? `Also ${on ? 'granted' : 'removed'} for the other sub tabs: ${changed.map(labelOf).join(', ')}.` : '') +
+      (skipped.length ? ` Expenditure → Manage was not added because this group can Review & Approve financial records.` : '')
+    );
+  };
+
+  // One-off helper for groups saved before this rule existed: spread every ticked permission to its sibling sub tabs.
+  const applyToSubTabs = () => {
+    const next = { ...enabled }; let count = 0;
+    Object.keys(enabled).filter(k => enabled[k]).forEach(k => inheritedPermissionKeys(k).forEach(s => {
+      if (s === 'expenditure.manage' && enabled['finance_reviewer.approve']) return;
+      if (!next[s]) { next[s] = true; count++; }
+    }));
+    setEnabled(next); setMsg('');
+    setInheritNote(count ? `Ticked ${count} more permission(s) so every sub tab matches its parent tab. Press Save Permissions to keep them.` : 'Every sub tab already matches its parent tab.');
+  };
 
   const save = async () => {
     if (selectedRole === 'super_admin') { setMsg('Super Admin always has full access.'); return; }
@@ -401,6 +464,11 @@ function PermissionManager() {
     <h1>🔐 Role Permissions</h1>
     <p className="muted permissions-intro">Configure access for each user group. Super Admin always has full access.</p>
     <div className="card permission-role-card"><label>User group</label><select value={selectedRole} onChange={e=>setSelectedRole(e.target.value)} disabled={loading||saving}>{roles.map(r=><option key={r} value={r}>{roleLabels[r] || r.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())}</option>)}</select></div>
+    <div className="card permission-role-card">
+      <label className="permission-row" style={{margin:0}}><input type="checkbox" checked={inherit} onChange={e=>{setInherit(e.target.checked);setInheritNote('');}} disabled={saving||selectedRole==='super_admin'}/><span><strong>Apply to all sub tabs automatically</strong><small className="muted">Ticking or unticking View / Manage for one sub tab (for example Groups under Ministry, or Expenditure under Finance) does the same for every other sub tab under that tab. Pastor-only tabs, Approve, Reopen and Send SMS are never changed automatically.</small></span></label>
+      {inheritNote && <div className="success" style={{marginTop:8}}>{inheritNote}</div>}
+      <button type="button" className="secondary" style={{marginTop:8}} onClick={applyToSubTabs} disabled={saving||loading||selectedRole==='super_admin'}>Apply current ticks to all sub tabs</button>
+    </div>
     <div className="card permission-role-card">
       <h2 style={{marginTop:0}}>Add user group</h2>
       <p className="muted" style={{marginTop:0}}>Create another role whenever the church needs one. Choose the closest database access template; the checkboxes below then control the application's permissions for that role.</p>
