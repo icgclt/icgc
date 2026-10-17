@@ -5,7 +5,7 @@ import { DataProvider, useData } from './data';
 import {
   Dashboard, Members, Attendance, AbsenteeList, HeadcountAttendance, ServiceTimer, ServiceTimerLive,
   Departments, Events, Users, Settings, SendSMS,
-  WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, EngagementAutomation, FinanceReconciliation, AdvancedReports, NotificationCenter, DeliveryCenter, MemberLookup, FinanceCenter, Expenditure, Cashbook, AutomationCenter,
+  FirstFruit, WelfareDues, WelfareFund, Visitors, Groups, FollowUps, PrayerRequests, ServicePlans, PastoralCare, AuditLog, MemberPortal, ABCClass, ChildrenQuickAttendance, ChildCheckIn, AdultCheckIn, OmegaCheckIn, CommunicationCenter, PastorDashboard, EngagementAutomation, FinanceReconciliation, AdvancedReports, NotificationCenter, DeliveryCenter, MemberLookup, FinanceCenter, Expenditure, Cashbook, AutomationCenter,
 } from './pages';
 import { DepartmentDashboard } from './operational';
 import { DepositSlip } from './deposit';
@@ -191,6 +191,7 @@ const NAV = [
   ] },
   { group: 'finance', label: '💰 Finance', items: [
     ['financecenter', 'Finance Center', FinanceCenter, 'finance.view'],
+    ['firstfruit', 'First Fruit Register', FirstFruit, 'finance.view'],
     ['depositslip', 'Deposit Slip', DepositSlip, 'finance.view'],
     ['expenditure', 'Expenditure', Expenditure, 'expenditure.view'],
     ['cashbook', 'Cashbook', Cashbook, 'finance.view'],
