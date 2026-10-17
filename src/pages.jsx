@@ -3057,8 +3057,8 @@ function ExpenditureScreen() {
   const { data, save, remove } = useData();
   const { hasPermission, role, profile } = useAuth();
 
-  const canWrite = hasPermission('expenditure.manage') && role !== 'pastor' && !hasPermission('finance_reviewer.approve');
-  const canReviewFinance = hasPermission('finance_reviewer.approve');
+  const canReviewFinance = hasPermission('finance_reviewer.approve') && role !== 'super_admin';
+  const canWrite = hasPermission('expenditure.manage') && role !== 'pastor' && !canReviewFinance;
   const isPastor = role === 'pastor';
 
   const [date, setDate] = useState(today());
@@ -3196,6 +3196,7 @@ function ExpenditureScreen() {
         </div>
       </div>
 
+      {!canWrite && <div className="panel" style={{borderLeft:'4px solid #1f6fb2'}}>{role==='pastor' ? 'The Pastor can view expenditure and authorise reopening, but does not enter it.' : canReviewFinance ? 'As Finance Reviewer you review submitted expenditure below. Entering expenditure is done by Finance or an Administrator.' : 'You can view expenditure but not add it. Ask a Super Admin to tick Manage Expenditure for your role under Role Permissions.'}</div>}
       {canWrite && (
         <div className="panel">
           <div className="toolbar">

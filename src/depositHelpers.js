@@ -105,3 +105,14 @@ export function computeSlip({ counted, momoTotal, onlineTotal, form }) {
   const unallocated = r2(withdraw - extraAlloc);
   return { withdraw, rows, extraCoins, extraAlloc, coinsAmount, totalCash, chequeTotal, totalDeposit, unallocated, balanced: Math.abs(unallocated) < 0.005 };
 }
+
+// The next working day after a date (skips Saturdays, Sundays and the listed holidays). Mirrors the database function.
+export const nextWorkingDay = (iso, holidays = new Set()) => {
+  let x = addDays(iso, 1);
+  for (let i = 0; i < 40; i++) {
+    const dow = new Date(x + 'T00:00:00Z').getUTCDay();
+    if (dow === 0 || dow === 6 || holidays.has(x)) x = addDays(x, 1); else break;
+  }
+  return x;
+};
+export const fmtLongDate = (iso) => (iso ? new Date(String(iso).slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '');

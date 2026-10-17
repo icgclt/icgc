@@ -4,7 +4,7 @@ import { useAuth, can } from './auth';
 import { uuid, today } from './utils';
 import {
   NOTES, num, r2, gh, esc, fmtDate, fmtDT, nowLocal, addDays, amountWords,
-  suggestNotes, countedFor, cashValue, computeSlip,
+  suggestNotes, countedFor, cashValue, computeSlip, nextWorkingDay, fmtLongDate,
 } from './depositHelpers';
 
 const CHURCH = import.meta.env.VITE_CHURCH_NAME || 'ICGC Dominion Temple';
@@ -33,7 +33,7 @@ function printSlip(v) {
   .f{border-bottom:1px solid #111;padding:3px 0;min-height:16px}
   .f b{font-weight:bold}
   .full{grid-column:1/3}
-  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px}
+  table{width:100%;border-collapse:collapse;margin:8px 0}
   th,td{border:1px solid #111;padding:4px 6px}
   th{background:#eee;text-align:left}
   .r{text-align:right}
@@ -84,19 +84,22 @@ export function DepositSlip() {
   const canManage = can(role, 'offering_deposits', 'write');
   const isPastor = role === 'pastor';
 
-  // Only reports that have been submitted for review appear here. A Draft (or Returned / Reopened / Rejected)
-  // report stays out, unless a slip was already saved for it.
   const reports = useMemo(() => [...(data.finance_weekly_reports || [])]
-    .filter((r) => ['Submitted', 'Checked', 'Approved'].includes(r.status) || (data.offering_deposits || []).some((d) => d.report_id === r.id))
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.week_no || 0) - (a.week_no || 0)), [data.finance_weekly_reports, data.offering_deposits]);
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.week_no || 0) - (a.week_no || 0)), [data.finance_weekly_reports]);
   const deposits = data.offering_deposits || [];
   const settings = (data.bank_deposit_settings || [])[0];
+  const holidays = data.public_holidays || [];
+  const holidaySet = useMemo(() => new Set((data.public_holidays || []).map((h) => String(h.holiday_date).slice(0, 10))), [data.public_holidays]);
+  const alertSettings = (data.deposit_alert_settings || [])[0];
 
   const [reportId, setReportId] = useState('');
   const report = reports.find((r) => r.id === reportId) || reports[0];
   const rid = report?.id;
   const deposit = deposits.find((d) => d.report_id === rid);
   const locked = !!deposit && deposit.status !== 'Prepared';
+  const dueDate = report ? nextWorkingDay(report.date, holidaySet) : null;
+  const isDone = !!deposit && ['Deposited', 'Acknowledged'].includes(deposit.status);
+  const overdue = !!dueDate && !isDone && new Date().toISOString() >= `${dueDate}T12:00:00.000Z`;
 
   const [msg, setMsg] = useState('');
   const [showBank, setShowBank] = useState(false);
@@ -201,18 +204,24 @@ export function DepositSlip() {
   const [depAt, setDepAt] = useState(nowLocal());
   const [depRef, setDepRef] = useState('');
   const [depNote, setDepNote] = useState('');
+  const [depSerial, setDepSerial] = useState('');
+  const [holDate, setHolDate] = useState('');
+  const [holName, setHolName] = useState('');
+  const [alertDraft, setAlertDraft] = useState(null);
   const [ackNote, setAckNote] = useState('');
   const markDeposited = () => {
     if (!deposit || dirty) return;
+    if (!depSerial.trim()) { setMsg('Enter the serial number printed on the deposit form first.'); return; }
     if (!calc.balanced) { setMsg('The slip does not balance yet. Share out the withdrawn Mobile Money / online money first.'); return; }
-    if (!confirm(`Confirm that ${gh(deposit.total_deposit)} has been deposited at the bank? The slip will be locked and the Pastor will be able to see it.`)) return;
+    if (!confirm(`Confirm that ${gh(deposit.total_deposit)} has been deposited at the bank with deposit form serial no. ${depSerial.trim()}? The slip will be locked${alertSettings?.alerts_enabled ? ' and an SMS will go to the Pastor and the Finance Reviewer' : ''}.`)) return;
     save('offering_deposits', { ...deposit, status: 'Deposited', deposited_at: new Date(depAt || Date.now()).toISOString(),
-      deposited_by_name: profile?.full_name || '', bank_reference: depRef.trim(), deposit_note: depNote.trim() });
-    setMsg('Marked as deposited. The Pastor can now see it.');
+      deposited_by_name: profile?.full_name || '', slip_serial_no: depSerial.trim(), bank_reference: depRef.trim(), deposit_note: depNote.trim() });
+    setMsg(`Marked as deposited. The Pastor can now see it.${alertSettings?.alerts_enabled ? ' The Pastor and Finance Reviewer will receive an SMS with the serial number.' : ' SMS alerts are switched off, so no SMS was sent.'}`);
+    setDepSerial('');
   };
   const undoDeposit = () => {
     if (!deposit || !confirm('Undo "Deposited"? Use this only if it was marked by mistake.')) return;
-    save('offering_deposits', { ...deposit, status: 'Prepared' }); setMsg('Deposit undone. The slip is open for editing again.');
+    save('offering_deposits', { ...deposit, status: 'Prepared', slip_serial_no: null }); setMsg('Deposit undone. The slip is open for editing again.');
   };
   const acknowledge = () => {
     if (!deposit || !confirm(`Acknowledge that the offering of ${gh(deposit.total_deposit)} for ${fmtDate(deposit.report_date)} has been deposited?`)) return;
@@ -262,13 +271,30 @@ export function DepositSlip() {
       </>}
     </div>
 
-    {!report ? <div className="panel empty">No submitted weekly offering reports yet. A report appears here once it has been submitted for review in Finance → Finance Center. Drafts are not shown.</div> : <>
+    {alertSettings && <div className="panel">
+      <h2 style={{ marginTop: 0 }}>Deposit SMS alerts <span className="badge" style={alertSettings.alerts_enabled ? STATUS_STYLE.Deposited : STATUS_STYLE.Prepared}>{alertSettings.alerts_enabled ? 'ON' : 'OFF'}</span></h2>
+      <p className="muted">When a deposit is marked as made, an SMS with the deposit form's serial number goes to the Pastor and the Finance Reviewer. If a Sunday's offering has not been deposited, they are reminded by SMS every day at 12:00 noon, starting on the due day (the next working day after Sunday, skipping weekends and the holidays below). SMS go to every Pastor and Finance Reviewer user whose member record has a phone number, and are sent by the notification worker.</p>
+      {canManage && <div className="formgrid">
+        <div><label><input type="checkbox" checked={(alertDraft ?? alertSettings).alerts_enabled} onChange={(e) => setAlertDraft({ ...(alertDraft ?? alertSettings), alerts_enabled: e.target.checked })} /> Send deposit SMS alerts</label></div>
+        <div><label>Only for offerings dated from</label><input type="date" value={String((alertDraft ?? alertSettings).start_date).slice(0, 10)} onChange={(e) => setAlertDraft({ ...(alertDraft ?? alertSettings), start_date: e.target.value })} /></div>
+      </div>}
+      {canManage && alertDraft && <div className="toolbar"><button className="primary" onClick={() => { save('deposit_alert_settings', { ...alertSettings, alerts_enabled: alertDraft.alerts_enabled, start_date: alertDraft.start_date }); setAlertDraft(null); setMsg('SMS alert settings saved.'); }}>Save alert settings</button><button className="secondary" onClick={() => setAlertDraft(null)}>Cancel</button></div>}
+      {!canManage && <p className="muted">Starting from {String(alertSettings.start_date).slice(0, 10)}. Only Admin and Finance can change this.</p>}
+      <h3>Public holidays</h3>
+      <p className="muted sm">The deposit is due before noon on the next working day after Sunday. Add a holiday here and a Monday holiday moves the due day to Tuesday.</p>
+      {canManage && <div className="toolbar"><input type="date" value={holDate} onChange={(e) => setHolDate(e.target.value)} /><input placeholder="Holiday name (optional)" value={holName} onChange={(e) => setHolName(e.target.value)} /><button className="secondary" disabled={!holDate} onClick={() => { if (holidaySet.has(holDate)) { setMsg('That date is already listed.'); return; } save('public_holidays', { id: uuid(), holiday_date: holDate, name: holName.trim() }); setHolDate(''); setHolName(''); }}>Add holiday</button></div>}
+      {[...holidays].sort((a, b) => String(b.holiday_date).localeCompare(String(a.holiday_date))).slice(0, 15).map((h) => <p key={h.id} style={{ margin: '4px 0' }}>{fmtLongDate(h.holiday_date)}{h.name ? ` · ${h.name}` : ''} {canManage && <button className="danger" onClick={() => { if (confirm('Remove this holiday?')) remove('public_holidays', h.id); }}>Remove</button>}</p>)}
+      {!holidays.length && <p className="muted">No holidays listed yet.</p>}
+    </div>}
+
+    {!report ? <div className="panel empty">No weekly offering reports yet. Record one under Finance → Finance Center first.</div> : <>
       <div className="cards">
         <div className="card"><span className="label">Cash counted</span><strong>{gh(cashCounted)}</strong></div>
         <div className="card"><span className="label">Mobile Money (report)</span><strong>{gh(momoTotal)}</strong></div>
         <div className="card"><span className="label">Online (portal)</span><strong>{gh(onlineTotal)}</strong></div>
         <div className="card"><span className="label">Total to deposit</span><strong>{gh(calc.totalDeposit)}</strong></div>
         <div className="card"><span className="label">Status</span><strong>{deposit ? <StatusBadge status={deposit.status} /> : 'No slip yet'}</strong></div>
+        <div className="card"><span className="label">Deposit due</span><strong style={{ fontSize: '1rem' }}>{fmtLongDate(dueDate)}, before 12:00 noon</strong>{overdue && <span className="badge" style={{ background: '#fde2dd', color: '#a8381c' }}>OVERDUE</span>}{isDone && <span className="badge" style={STATUS_STYLE.Deposited}>Done</span>}</div>
       </div>
       {report.status !== 'Approved' && <div className="panel" style={{ borderLeft: '4px solid #d9822b' }}>The weekly report for this date is <b>{report.status}</b>, not yet approved. You can still prepare the slip, but check that the figures are final.</div>}
       {stale && <div className="panel" style={{ borderLeft: '4px solid #c0392b' }}>The weekly report figures have <b>changed</b> since this slip was saved. Click <b>Update slip</b> to refresh it.</div>}
@@ -335,19 +361,20 @@ export function DepositSlip() {
 
         {deposit?.status === 'Prepared' && canManage && <div className="panel" style={{ background: '#f6f9fc', marginTop: 12 }}>
           <h3 style={{ marginTop: 0 }}>Money deposited? Tell the Pastor</h3>
-          <p className="muted">After the teller has stamped the slip, fill this in and confirm. The slip is then locked and appears on the Pastor's dashboard.</p>
+          <p className="muted">After the teller has stamped the slip, enter the serial number from the bank's deposit form and confirm. The slip is then locked, it appears on the Pastor's dashboard, and (when SMS alerts are on) the Pastor and the Finance Reviewer receive an SMS with the serial number.</p>
           <div className="formgrid">
             <div><label>Date and time deposited</label><input type="datetime-local" value={depAt} onChange={(e) => setDepAt(e.target.value)} /></div>
-            <div><label>Bank transaction ref / teller receipt no.</label><input value={depRef} onChange={(e) => setDepRef(e.target.value)} /></div>
+            <div><label>Serial number on the deposit form (required)</label><input value={depSerial} onChange={(e) => setDepSerial(e.target.value)} placeholder="Printed on the bank's deposit slip" /></div>
+            <div><label>Bank transaction ref / teller receipt no. (optional)</label><input value={depRef} onChange={(e) => setDepRef(e.target.value)} /></div>
             <div style={{ gridColumn: '1 / -1' }}><label>Note (optional)</label><input value={depNote} onChange={(e) => setDepNote(e.target.value)} /></div>
           </div>
-          <div className="toolbar"><button className="primary" disabled={dirty || !calc.balanced} onClick={markDeposited}>✔ I have deposited this money</button></div>
+          <div className="toolbar"><button className="primary" disabled={dirty || !calc.balanced || !depSerial.trim()} onClick={markDeposited}>✔ I have deposited this money</button></div>
           {!calc.balanced && <p style={{ color: '#a8381c' }}>Share out the withdrawn Mobile Money / online money first (see above), then save the slip.</p>}
         </div>}
         {deposit?.status === 'Prepared' && !canManage && <p className="muted">Waiting for the depositor to mark this slip as deposited.</p>}
 
         {deposit?.status === 'Deposited' && <div className="panel" style={{ background: '#eef8f0', marginTop: 12 }}>
-          <b>Deposited</b> on {fmtDT(deposit.deposited_at)} by {deposit.deposited_by_name || 'the depositor'}{deposit.bank_reference ? ` · Ref ${deposit.bank_reference}` : ''}.{deposit.deposit_note ? ` Note: ${deposit.deposit_note}` : ''}
+          <b>Deposited</b> on {fmtDT(deposit.deposited_at)} by {deposit.deposited_by_name || 'the depositor'}{deposit.slip_serial_no ? ` · Serial no. ${deposit.slip_serial_no}` : ''}{deposit.bank_reference ? ` · Ref ${deposit.bank_reference}` : ''}.{deposit.deposit_note ? ` Note: ${deposit.deposit_note}` : ''}
           {isPastor && <div style={{ marginTop: 10 }}>
             <label>Note (optional)</label><input value={ackNote} onChange={(e) => setAckNote(e.target.value)} />
             <div className="toolbar"><button className="primary" onClick={acknowledge}>Acknowledge deposit</button></div></div>}
@@ -356,20 +383,20 @@ export function DepositSlip() {
         </div>}
 
         {deposit?.status === 'Acknowledged' && <div className="panel" style={{ background: '#eaf1fc', marginTop: 12 }}>
-          <b>Deposited</b> on {fmtDT(deposit.deposited_at)} by {deposit.deposited_by_name || 'the depositor'}{deposit.bank_reference ? ` · Ref ${deposit.bank_reference}` : ''}.<br />
+          <b>Deposited</b> on {fmtDT(deposit.deposited_at)} by {deposit.deposited_by_name || 'the depositor'}{deposit.slip_serial_no ? ` · Serial no. ${deposit.slip_serial_no}` : ''}{deposit.bank_reference ? ` · Ref ${deposit.bank_reference}` : ''}.<br />
           <b>Acknowledged</b> by {deposit.acknowledged_by_name || 'the Pastor'} on {fmtDT(deposit.acknowledged_at)}.{deposit.acknowledgement_note ? ` Note: ${deposit.acknowledgement_note}` : ''}
         </div>}
       </div>
 
       <div className="panel"><h2>Deposit history</h2><div className="tablewrap"><table>
-        <thead><tr><th>Week</th><th style={{ textAlign: 'right' }}>Total deposit</th><th>Status</th><th>Deposited</th><th>Bank ref</th><th>Pastor</th><th></th></tr></thead>
+        <thead><tr><th>Week</th><th style={{ textAlign: 'right' }}>Total deposit</th><th>Status</th><th>Deposited</th><th>Serial no.</th><th>Bank ref</th><th>Pastor</th><th></th></tr></thead>
         <tbody>{history.map((d) => <tr key={d.id}>
           <td>{fmtDate(d.report_date)} · Week {d.week_no}</td><td style={{ textAlign: 'right' }}>{gh(d.total_deposit)}</td><td><StatusBadge status={d.status} /></td>
-          <td>{d.deposited_at ? `${fmtDT(d.deposited_at)} (${d.deposited_by_name || ''})` : ''}</td><td>{d.bank_reference || ''}</td>
+          <td>{d.deposited_at ? `${fmtDT(d.deposited_at)} (${d.deposited_by_name || ''})` : ''}</td><td>{d.slip_serial_no || ''}</td><td>{d.bank_reference || ''}</td>
           <td>{d.acknowledged_at ? `${fmtDT(d.acknowledged_at)}` : ''}</td>
           <td><button onClick={() => { setReportId(d.report_id); setMsg(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Open</button></td>
         </tr>)}
-          {!history.length && <tr><td colSpan={7} className="empty">No deposit slips saved yet.</td></tr>}</tbody></table></div></div>
+          {!history.length && <tr><td colSpan={8} className="empty">No deposit slips saved yet.</td></tr>}</tbody></table></div></div>
     </>}
   </>;
 }
@@ -382,6 +409,8 @@ export function DepositAlerts() {
   const reports = data.finance_weekly_reports || [];
   const byReport = new Set(deposits.map((d) => d.report_id));
   const cutoff = addDays(today(), -90);
+  const holidaySet = new Set((data.public_holidays || []).map((h) => String(h.holiday_date).slice(0, 10)));
+  const dueText = (iso) => { const d = nextWorkingDay(iso, holidaySet); return ` · due ${fmtDate(d)} 12:00${new Date().toISOString() >= `${d}T12:00:00.000Z` ? ' · OVERDUE' : ''}`; };
   const awaitingAck = deposits.filter((d) => d.status === 'Deposited').sort((a, b) => String(b.deposited_at).localeCompare(String(a.deposited_at)));
   const notDeposited = deposits.filter((d) => d.status === 'Prepared');
   const noSlip = reports.filter((r) => ['Submitted', 'Checked', 'Approved'].includes(r.status) && !byReport.has(r.id) && num(r.grand_total) > 0 && String(r.date) >= cutoff)
@@ -399,11 +428,11 @@ export function DepositAlerts() {
       <div className="card"><span className="label">Counted, no slip yet (90 days)</span><strong>{noSlip.length}</strong></div>
     </div>
     {awaitingAck.map((d) => <p key={d.id} style={{ margin: '6px 0' }}>
-      <b>{fmtDate(d.report_date)} · Week {d.week_no}</b>: {gh(d.total_deposit)} deposited {fmtDT(d.deposited_at)} by {d.deposited_by_name || 'the depositor'}{d.bank_reference ? ` (ref ${d.bank_reference})` : ''}{' '}
+      <b>{fmtDate(d.report_date)} · Week {d.week_no}</b>: {gh(d.total_deposit)} deposited {fmtDT(d.deposited_at)} by {d.deposited_by_name || 'the depositor'}{d.slip_serial_no ? ` · serial no. ${d.slip_serial_no}` : ''}{d.bank_reference ? ` (ref ${d.bank_reference})` : ''}{' '}
       {role === 'pastor' && <button className="primary" onClick={() => ack(d)}>Acknowledge</button>}
     </p>)}
-    {notDeposited.map((d) => <p key={d.id} className="muted" style={{ margin: '6px 0' }}>Not yet deposited: {fmtDate(d.report_date)} · Week {d.week_no}, {gh(d.total_deposit)}</p>)}
-    {noSlip.map((r) => <p key={r.id} className="muted" style={{ margin: '6px 0' }}>No deposit slip yet: {fmtDate(r.date)} · Week {r.week_no}, {gh(r.grand_total)} counted</p>)}
+    {notDeposited.map((d) => <p key={d.id} className="muted" style={{ margin: '6px 0' }}>Not yet deposited: {fmtDate(d.report_date)} · Week {d.week_no}, {gh(d.total_deposit)}{dueText(d.report_date)}</p>)}
+    {noSlip.map((r) => <p key={r.id} className="muted" style={{ margin: '6px 0' }}>No deposit slip yet: {fmtDate(r.date)} · Week {r.week_no}, {gh(r.grand_total)} counted{dueText(r.date)}</p>)}
     {recent.length > 0 && <p className="muted sm" style={{ marginTop: 10 }}>Recently acknowledged: {recent.map((d) => `${fmtDate(d.report_date)} (${gh(d.total_deposit)})`).join(' · ')}</p>}
     {!awaitingAck.length && !notDeposited.length && !noSlip.length && <p className="muted">All counted offerings are deposited and acknowledged.</p>}
   </div>;
