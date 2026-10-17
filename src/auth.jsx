@@ -63,7 +63,63 @@ export const PERMS = {
   finance_weekday_momo: { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
   announcements:           { read: ['admin','secretary','viewer'], write: ['admin','secretary'], del: ['admin'] },
 };
-export const can = (role, table, action) => PERMS[table]?.[action]?.includes(effectiveRole(role)) || false;
+// ---- Permission-aware access ---------------------------------------------------------------
+// can() used to look only at the fixed role name, so a group with every box ticked under Role Permissions was still
+// treated as read-only on most screens. It now also honours the ticked permissions. Nobody loses anything: the old
+// role lists are checked first.
+let CURRENT_PERMS = new Set();
+export const setCurrentPermissions = (list) => { CURRENT_PERMS = new Set(list || []); };
+const TP = (view, manage, extra = {}) => ({ read: view, write: manage, ...extra });
+const TABLE_PERMS = {
+  members: TP(['members.view'], ['members.create', 'members.edit'], { del: ['members.delete'] }),
+  attendance: TP(['attendance.view'], ['attendance.record', 'attendance.edit'], { del: ['attendance.delete'] }),
+  attendance_headcount: TP(['attendance.view'], ['attendance.record', 'attendance.edit'], { del: ['attendance.delete'] }),
+  children: TP(['children.view'], ['children.manage']),
+  families: TP(['children.view'], ['children.manage']),
+  child_checkins: TP(['child_checkins.view'], ['child_checkins.manage']),
+  departments: TP(['departments.view'], ['departments.manage']),
+  department_members: TP(['departments.view'], ['departments.manage']),
+  volunteers: TP(['departments.view'], ['departments.manage']),
+  volunteer_schedules: TP(['departments.view'], ['departments.manage']),
+  events: TP(['events.view'], ['events.manage']),
+  event_registrations: TP(['events.view'], ['events.manage']),
+  groups: TP(['groups.view'], ['groups.manage']),
+  group_members: TP(['groups.view'], ['groups.manage']),
+  group_attendance: TP(['groups.view'], ['groups.manage']),
+  visitors: TP(['visitors.view'], ['visitors.manage']),
+  follow_ups: TP(['followups.view'], ['followups.manage']),
+  service_plans: TP(['service_plans.view'], ['service_plans.manage']),
+  service_timer_items: TP(['service_plans.view'], ['service_plans.manage'], { del: ['service_plans.manage'] }),
+  welfare_members: TP(['welfare.view'], ['welfare.manage']),
+  welfare_transactions: TP(['welfare.view', 'finance.view'], ['welfare.manage']),
+  member_contributions: TP(['finance.view', 'welfare.view'], ['finance.manage', 'welfare.manage']),
+  giving: TP(['finance.view'], ['finance.manage']),
+  offering_entries: TP(['finance.view'], ['finance.manage']),
+  pledges: TP(['finance.view'], ['finance.manage']),
+  payment_receipts: TP(['finance.view'], ['finance.manage']),
+  finance_reconciliations: TP(['finance_reconciliation.view'], ['finance_reconciliation.manage']),
+  cashbook_entries: TP(['finance.view'], ['finance.manage']),
+  communication_templates: TP(['notifications.view'], ['notifications.manage']),
+  communication_queue: TP(['notifications.view'], ['notifications.manage']),
+  announcements: TP(['notifications.view'], ['notifications.manage']),
+  // Finance Center weekly reports, deposits and bank settings are read-only here: they keep their own approve / lock workflow.
+  finance_weekly_reports: { read: ['finance.view'] },
+  finance_weekly_cash_counts: { read: ['finance.view'] },
+  finance_weekly_momo: { read: ['finance.view'] },
+  finance_weekday_collections: { read: ['finance.view'] },
+  finance_weekday_cash_counts: { read: ['finance.view'] },
+  finance_weekday_momo: { read: ['finance.view'] },
+  offering_deposits: { read: ['finance.view'] },
+};
+// Money tables: people who approve, and the Pastor, never prepare or edit them (separation of duties).
+const MONEY_TABLES = new Set(['welfare_transactions', 'member_contributions', 'giving', 'offering_entries', 'pledges', 'payment_receipts', 'finance_reconciliations', 'cashbook_entries']);
+export const can = (role, table, action) => {
+  if (PERMS[table]?.[action]?.includes(effectiveRole(role))) return true;
+  const keys = TABLE_PERMS[table]?.[action];
+  if (!keys || !keys.some((k) => CURRENT_PERMS.has(k))) return false;
+  if (action !== 'read' && MONEY_TABLES.has(table) && (role === 'pastor' || role === 'finance_reviewer' || CURRENT_PERMS.has('finance_reviewer.approve'))) return false;
+  return true;
+};
 
 const OFFLINE_AUTH_PREFIX = 'cm:offline-auth:v1:';
 const OFFLINE_AUTH_INDEX = 'cm:offline-auth:index:v1';
@@ -409,6 +465,8 @@ export function AuthProvider({ children }) {
     return result;
   };
 
+  // Keep can() in step with the signed-in user's ticked permissions (runs before any screen renders).
+  setCurrentPermissions(permissions);
   const value = {
     session, user: session?.user ?? null, profile, role: profile?.role, permissions, permissionsLoading,
     hasPermission: (permissionKey) => profile?.role === 'super_admin' || permissions.includes(permissionKey),

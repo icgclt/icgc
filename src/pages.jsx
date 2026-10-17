@@ -2166,7 +2166,7 @@ export function Visitors() {
 export function ABCClass() {
   const { data, save, remove } = useData();
   const { role } = useAuth();
-  const canWrite = ['admin','secretary'].includes(role) || isSuperAdmin(role);
+  const canWrite = can(role, 'groups', 'write') || isSuperAdmin(role);
   const [q, setQ] = useState('');
   const [date, setDate] = useState(today());
   const [startDate, setStartDate] = useState('');
@@ -2372,7 +2372,8 @@ function auditChanges(r) {
 }
 const PASTOR_ONLY_TABLES = new Set(['prayer_requests', 'pastoral_cases']);
 export function AuditLog() {
-  const { role } = useAuth();
+  const { role, hasPermission } = useAuth();
+  const auditOk = isAdmin(role) || hasPermission('audit.view');
   const [rows,setRows]=useState([]); const [error,setError]=useState(''); const [notice,setNotice]=useState('');
   const [olderThan,setOlderThan]=useState('365'); const [busy,setBusy]=useState(false);
   const [memberMap,setMemberMap]=useState({});
@@ -2388,7 +2389,7 @@ export function AuditLog() {
     }
     setMemberMap(map);
   });
-  useEffect(()=>{ if(!isAdmin(role)) return; load(); },[role]);
+  useEffect(()=>{ if(!auditOk) return; load(); },[role, auditOk]);
   const purge=async()=>{
     const days=Number(olderThan);
     const label={90:'3 months',180:'6 months',365:'1 year',730:'2 years'}[days]||`${days} days`;
@@ -2400,7 +2401,7 @@ export function AuditLog() {
     setNotice(`${data} old ${data===1?'entry was':'entries were'} deleted.`);
     load();
   };
-  if(!isAdmin(role)) return <div className="panel"><h1>Audit Log</h1><p className="muted">Admin access only.</p></div>;
+  if(!auditOk) return <div className="panel"><h1>Audit Log</h1><p className="muted">Admin access only.</p></div>;
   return <><div className="top"><h1>Audit Log</h1><button className="secondary" onClick={load}>Refresh</button></div>
     {isSuperAdmin(role)&&<div className="panel"><div className="btnrow" style={{alignItems:'center',flexWrap:'wrap'}}>
       <span>Clean up: delete entries older than</span>
@@ -3815,8 +3816,8 @@ export function Cashbook() {
 
 export function CommunicationCenter() {
   const { data } = useData();
-  const { role } = useAuth();
-  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  const { role, hasPermission } = useAuth();
+  if (!hasPermission('notifications.view') && !['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Communication Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const active = data.members.filter(m=>m.status==='Active' && m.phone).length;
   const announcements = [...data.announcements].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))).slice(0,8);
   return <>
@@ -4111,8 +4112,8 @@ export function MemberGiving() {
 
 export function EngagementAutomation() {
   const { data } = useData();
-  const { role } = useAuth();
-  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  const { role, hasPermission } = useAuth();
+  if (!hasPermission('notifications.manage') && !['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Engagement Automation</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   const templates=[...(data.communication_templates||[])].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
   const queue=[...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const birthdayCount=data.members.filter(m=>m.dob && String(m.dob).slice(5)===today().slice(5)).length;
@@ -4175,8 +4176,8 @@ function FinanceReconciliationScreen() {
 }
 
 export function AutomationCenter() {
-  const { role } = useAuth();
-  if (!['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  const { role, hasPermission } = useAuth();
+  if (!hasPermission('notifications.manage') && !['admin','secretary'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Automation Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   return <AutomationCenterScreen />;
 }
 
@@ -4409,10 +4410,10 @@ export function MobileMoneyPayments() {
 /* ---------------- V17 Delivery Center ---------------- */
 export function DeliveryCenter() {
   const { data, syncNow } = useData();
-  const { role } = useAuth();
+  const { role, hasPermission } = useAuth();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const allowed = ['admin','secretary'].includes(role) || isSuperAdmin(role);
+  const allowed = hasPermission('notifications.view') || ['admin','secretary'].includes(role) || isSuperAdmin(role);
   const queue = [...(data.communication_queue||[])].sort((a,b)=>String(a.scheduled_for||'').localeCompare(String(b.scheduled_for||'')));
   const queued = queue.filter(q=>q.status==='Queued');
   const failed = queue.filter(q=>q.status==='Failed');
@@ -4440,9 +4441,9 @@ export function DeliveryCenter() {
 
 /* ---------------- V15 Church-wide Notification Center ---------------- */
 export function NotificationCenter() {
-  const { role } = useAuth();
+  const { role, hasPermission } = useAuth();
   const allowed = ['admin','secretary'];
-  if (!allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
+  if (!hasPermission('notifications.view') && !allowed.includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Notification Center</h2><p className="muted">Only administrators and secretaries have access.</p></div>;
   return <NotificationCenterScreen />;
 }
 

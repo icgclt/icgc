@@ -462,7 +462,7 @@ function PermissionManager() {
 
   return <section className="permissions-page">
     <h1>🔐 Role Permissions</h1>
-    <p className="muted permissions-intro">Configure access for each user group. Super Admin always has full access.</p>
+    <p className="muted permissions-intro">Configure access for each user group. Super Admin always has full access. A ticked View opens the screen; a ticked Manage lets the group add and edit on it. Deleting stays Admin only (except Members and Attendance, which have their own Delete box). Finance Center weekly reports and Deposit Slips can be viewed with View Finance, but saving them still follows the approve / lock / reopen workflow and the group’s database access template. Users, Settings, Backup and Clear Test Data stay Admin / Super Admin only.</p>
     <div className="card permission-role-card"><label>User group</label><select value={selectedRole} onChange={e=>setSelectedRole(e.target.value)} disabled={loading||saving}>{roles.map(r=><option key={r} value={r}>{roleLabels[r] || r.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())}</option>)}</select></div>
     <div className="card permission-role-card">
       <label className="permission-row" style={{margin:0}}><input type="checkbox" checked={inherit} onChange={e=>{setInherit(e.target.checked);setInheritNote('');}} disabled={saving||selectedRole==='super_admin'}/><span><strong>Apply to all sub tabs automatically</strong><small className="muted">Ticking or unticking View / Manage for one sub tab (for example Groups under Ministry, or Expenditure under Finance) does the same for every other sub tab under that tab. Pastor-only tabs, Approve, Reopen and Send SMS are never changed automatically.</small></span></label>
