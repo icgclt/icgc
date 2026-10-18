@@ -157,7 +157,8 @@ function Pending() {
 // A plain entry is [id, label, Component, permissionKey].
 // A group is { group, label, items: [...entries] }.
 // Pastoral Care, Prayer Requests and the Pastoral Dashboard are private to the Pastor role.
-const PASTOR_ONLY = new Set(['prayer', 'pastoral', 'pastordashboard']);
+// Menu pages that only the Pastor role can see or open (Super Admin, Admin and every other role cannot).
+const PASTOR_ONLY = new Set(['prayer', 'pastoral', 'pastordashboard', 'cashbook', 'financereconciliation']);
 
 const NAV = [
   ['dashboard', '📊 Dashboard', Dashboard, 'dashboard.view'],
@@ -226,13 +227,14 @@ function NavLabel({ label }) {
 }
 
 function SyncBadge() {
-  const { online, syncError, syncing, pending, syncNow } = useData();
+  const { online, syncError, syncing, pending, syncNow, failed } = useData();
   const connected = online && !syncError;
   return (
     <button className="syncbadge" onClick={syncNow} title="Click to sync now">
       <span className={'dot ' + (connected ? 'ok' : 'off')} />
       {syncing ? 'Syncing…' : connected ? 'Online' : 'Offline'}
       {pending > 0 && <span className="pill">{pending} unsynced</span>}
+      {failed.length > 0 && <span className="pill" style={{ background: '#b91c1c', color: '#fff' }}>{failed.length} change(s) rejected — open Settings to retry</span>}
     </button>
   );
 }
@@ -462,7 +464,7 @@ function PermissionManager() {
 
   return <section className="permissions-page">
     <h1>🔐 Role Permissions</h1>
-    <p className="muted permissions-intro">Configure access for each user group. Super Admin always has full access. A ticked View opens the screen; a ticked Manage lets the group add and edit on it. Deleting stays Admin only (except Members and Attendance, which have their own Delete box). Finance Center weekly reports and Deposit Slips can be viewed with View Finance, but saving them still follows the approve / lock / reopen workflow and the group’s database access template. Users, Settings, Backup and Clear Test Data stay Admin / Super Admin only.</p>
+    <p className="muted permissions-intro">Configure access for each user group. Super Admin always has full access. A ticked View opens the screen; a ticked Manage lets the group add and edit on it. Deleting stays Admin only (except Members and Attendance, which have their own Delete box). Finance Center weekly reports and Deposit Slips can be viewed with View Finance, but saving them still follows the approve / lock / reopen workflow and the group’s database access template. Users, Settings, Backup and Clear Test Data stay Admin / Super Admin only. Prayer Requests, Pastoral Care, Cashbook and Reconciliation are private to the Pastor role whatever is ticked here.</p>
     <div className="card permission-role-card"><label>User group</label><select value={selectedRole} onChange={e=>setSelectedRole(e.target.value)} disabled={loading||saving}>{roles.map(r=><option key={r} value={r}>{roleLabels[r] || r.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())}</option>)}</select></div>
     <div className="card permission-role-card">
       <label className="permission-row" style={{margin:0}}><input type="checkbox" checked={inherit} onChange={e=>{setInherit(e.target.checked);setInheritNote('');}} disabled={saving||selectedRole==='super_admin'}/><span><strong>Apply to all sub tabs automatically</strong><small className="muted">Ticking or unticking View / Manage for one sub tab (for example Groups under Ministry, or Expenditure under Finance) does the same for every other sub tab under that tab. Pastor-only tabs, Approve, Reopen and Send SMS are never changed automatically.</small></span></label>
@@ -499,7 +501,7 @@ function Shell() {
 
   const allowed = ([id, , , need]) => {
     if (role === 'member') return id === 'memberportal';
-    if (PASTOR_ONLY.has(id) && role !== 'pastor') return false;
+    if (PASTOR_ONLY.has(id)) return role === 'pastor';   // no permission tick needed or able to change this
     if (!need) return true;
     return hasPermission(need);
   };

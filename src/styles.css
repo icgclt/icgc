@@ -247,3 +247,20 @@ button.danger:disabled { opacity: .55; cursor: not-allowed; }
 .mpitem.hi{background:#eef4ff}
 .mpitem small{color:var(--muted)}
 .mpempty{padding:12px;color:var(--muted)}
+
+/* First Fruit / Welfare register colours */
+.gridtable td.cpaid{background:#dcf5e1}
+.gridtable td.cmiss{background:#fde2e2}
+.gridtable td.cpaid .cellinput,.gridtable td.cmiss .cellinput{background:transparent}
+.gridtable tbody tr:hover td.cpaid{background:#c8eed1}
+.gridtable tbody tr:hover td.cmiss{background:#fbcdcd}
+.gridlegend{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.gridlegend .lg{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);background:#fff}
+.gridlegend .lg.paid{background:#dcf5e1;border-color:#b7e3c0}.gridlegend .lg.miss{background:#fde2e2;border-color:#f3bcbc}
+
+/* typed-but-unsaved cells in the register */
+.gridtable td.cdirty{background:#fff1b8}
+.gridtable td.cdirty .cellinput{background:transparent}
+.gridtable tbody tr:hover td.cdirty{background:#ffe896}
+.gridlegend .lg.dirty{background:#fff1b8;border-color:#f0c36d}
+.draftbar{background:#fff7e0;border:1px solid #f0c36d;border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}

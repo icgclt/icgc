@@ -1259,36 +1259,71 @@ function ContributionsGrid({ fund, roster, title }) {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [amount, setAmount] = useState('');
 
+  const { user } = useAuth();
+  const draftKey = `cm:regdraft:${user?.id || 'anon'}:${fund}:${year}`;
+
+  // A payment belongs to a member, matched by member ID, so renaming a member never hides their payments.
+  // The name is only a fallback for old records that have no member ID.
   const existing = useMemo(() => {
     const map = new Map();
-    data.member_contributions.forEach((c) => {
-      if (c.fund === fund && Number(c.year) === Number(year)) map.set(c.person_name + '|' + c.month, c);
+    (data.member_contributions || []).forEach((c) => {
+      if (c.fund !== fund || Number(c.year) !== Number(year)) return;
+      if (c.member_id) map.set('id:' + c.member_id + '|' + c.month, c);
+      else map.set('n:' + c.person_name + '|' + c.month, c);
     });
     return map;
   }, [data.member_contributions, fund, year]);
+  const recFor = (m, mth) => (m ? (existing.get('id:' + m.id + '|' + mth) || existing.get('n:' + m.name + '|' + mth)) : undefined);
 
-  useEffect(() => { setEdits({}); }, [year, fund]);
+  // Typed-but-not-yet-saved cells are kept on this device (per user, fund and year), so a refresh, a page change or a
+  // reload when the internet returns can no longer wipe them.
+  const persistDraft = (next) => {
+    try { if (Object.keys(next).length) localStorage.setItem(draftKey, JSON.stringify(next)); else localStorage.removeItem(draftKey); } catch { /* storage unavailable */ }
+  };
+  useEffect(() => {
+    try { const s = localStorage.getItem(draftKey); setEdits(s ? JSON.parse(s) : {}); } catch { setEdits({}); }
+  }, [draftKey]);
   useEffect(() => { if (memberId && !roster.some(m => m.id === memberId)) setMemberId(''); }, [roster, memberId]);
 
-  const shown = roster.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()) || String(m.member_code || '').toLowerCase().includes(q.trim().toLowerCase()));
-  const valueFor = (name, mth) => {
-    const k = name + '|' + mth;
+  // Order: members who have paid something this year first, then by member ID. Based on SAVED payments, so a row does not jump while you type.
+  const paidSaved = useMemo(() => { const s = new Set(); existing.forEach((c) => { if (Number(c.amount) > 0) s.add(c.member_id ? 'id:' + c.member_id : 'n:' + c.person_name); }); return s; }, [existing]);
+  const isPaid = (m) => paidSaved.has('id:' + m.id) || paidSaved.has('n:' + m.name);
+  const byId = (a, b) => String(a.member_code || '\uffff').localeCompare(String(b.member_code || '\uffff'), undefined, { numeric: true, sensitivity: 'base' }) || String(a.name).localeCompare(String(b.name));
+  const shown = roster
+    .filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()) || String(m.member_code || '').toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => (isPaid(b) - isPaid(a)) || byId(a, b));
+  // Colours: green = has an amount; light red = a month that has already come with nothing paid; months not yet come stay plain.
+  const nowD = new Date();
+  const monthHasCome = (mth) => Number(year) < nowD.getFullYear() || (Number(year) === nowD.getFullYear() && mth <= nowD.getMonth() + 1);
+  const num = (v) => Number(v) || 0;
+  const savedAmount = (m, mth) => { const rec = recFor(m, mth); return rec ? rec.amount : ''; };
+  const valueFor = (m, mth) => {
+    const k = m.id + '|' + mth;
     if (k in edits) return edits[k];
-    const rec = existing.get(k);
+    const rec = recFor(m, mth);
     return rec ? String(rec.amount) : '';
   };
-  const setValue = (name, mth, v) => setEdits((e) => ({ ...e, [name + '|' + mth]: v }));
-  const rowTotal = (name) => MONTHS.reduce((s, _, i) => s + (Number(valueFor(name, i + 1)) || 0), 0);
-  const monthTotal = (mth) => shown.reduce((s, m) => s + (Number(valueFor(m.name, mth)) || 0), 0);
-  const grandTotal = shown.reduce((s, m) => s + rowTotal(m.name), 0);
+  const isDirty = (m, mth) => { const k = m.id + '|' + mth; return k in edits && num(edits[k]) !== num(savedAmount(m, mth)); };
+  const setValue = (m, mth, v) => { const next = { ...edits, [m.id + '|' + mth]: v }; setEdits(next); persistDraft(next); };
+  const rowTotal = (m) => MONTHS.reduce((s, _, i) => s + (Number(valueFor(m, i + 1)) || 0), 0);
+  const monthTotal = (mth) => shown.reduce((s, m) => s + (Number(valueFor(m, mth)) || 0), 0);
+  const grandTotal = shown.reduce((s, m) => s + rowTotal(m), 0);
+
+  const dirtyKeys = Object.keys(edits).filter((k) => { const [id, mth] = k.split('|'); const m = roster.find((x) => x.id === id); return m && isDirty(m, Number(mth)); });
+  const dirtyCount = dirtyKeys.length;
+  useEffect(() => {
+    if (!dirtyCount) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirtyCount]);
 
   const saveEntry = () => {
     const member = roster.find(m => m.id === memberId);
     const n = Number(amount);
     if (!member) return alert('Select a member.');
     if (!n || n <= 0) return alert('Enter a valid amount.');
-    const key = member.name + '|' + month;
-    const rec = existing.get(key);
+    const rec = recFor(member, month);
     save('member_contributions', {
       id: rec?.id || uuid(), fund, member_id: member.id, person_name: member.name,
       year: Number(year), month: Number(month), amount: n,
@@ -1299,29 +1334,31 @@ function ContributionsGrid({ fund, roster, title }) {
   };
 
   const saveAll = () => {
-    let n = 0;
-    Object.entries(edits).forEach(([k, v]) => {
-      const [name, monthStr] = k.split('|');
+    let n = 0; let sum = 0;
+    dirtyKeys.forEach((k) => {
+      const [id, monthStr] = k.split('|');
       const mth = Number(monthStr);
-      const amountNum = Number(v) || 0;
-      const rec = existing.get(k);
-      const member = roster.find(m => m.name === name);
+      const m = roster.find((x) => x.id === id);
+      if (!m) return;
+      const amountNum = Number(edits[k]) || 0;
+      const rec = recFor(m, mth);
       if (!rec && amountNum === 0) return;
       save('member_contributions', {
-        id: rec ? rec.id : uuid(), fund, member_id: member?.id || rec?.member_id || null,
-        person_name: name, year: Number(year), month: mth, amount: amountNum,
+        id: rec ? rec.id : uuid(), fund, member_id: m.id,
+        person_name: m.name, year: Number(year), month: mth, amount: amountNum,
       });
-      n++;
+      n++; sum += amountNum;
     });
-    setEdits({});
-    alert(n ? `Saved ${n} ${fund.toLowerCase()} entr${n === 1 ? 'y' : 'ies'}.` : 'No changes to save.');
+    setEdits({}); persistDraft({});
+    alert(n ? `Saved ${n} ${fund.toLowerCase()} entr${n === 1 ? 'y' : 'ies'} (total ${money(sum)}).${navigator.onLine ? '' : ' You are offline: they are stored on this device and are sent when the internet returns.'}` : 'No changes to save.');
   };
+  const discardDraft = () => { if (confirm(`Discard ${dirtyCount} unsaved entr${dirtyCount === 1 ? 'y' : 'ies'}?`)) { setEdits({}); persistDraft({}); } };
 
   return (
     <>
       <div className="top">
         <h1>{title}</h1>
-        <button className="primary" onClick={saveAll}>Save grid changes</button>
+        <button className="primary" onClick={saveAll}>Save grid changes{dirtyCount ? ` (${dirtyCount})` : ''}</button>
       </div>
       <div className="panel">
         <h2>Add payment</h2>
@@ -1331,19 +1368,21 @@ function ContributionsGrid({ fund, roster, title }) {
           <div><label>Month paid</label><select value={month} onChange={e => setMonth(Number(e.target.value))}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
           <div><label>Amount (GHS)</label><input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></div>
         </div>
-        {memberId && existing.get((roster.find(m => m.id === memberId)?.name || '') + '|' + month) && <p className="muted sm" style={{ marginTop: 8 }}>Already recorded for {MONTHS[month - 1]} {year}: <b>{money(existing.get(roster.find(m => m.id === memberId).name + '|' + month).amount)}</b>. Saving will replace it.</p>}
+        {(() => { const mm = roster.find(m => m.id === memberId); const r = mm && recFor(mm, month); return r ? <p className="muted sm" style={{ marginTop: 8 }}>Already recorded for {MONTHS[month - 1]} {year}: <b>{money(r.amount)}</b>. Saving will replace it.</p> : null; })()}
         <button className="primary" style={{ marginTop: 12 }} onClick={saveEntry}>Record {fund} payment</button>
         <p className="muted sm">The payment is recorded against the month selected above. For example, a payment made for March is recorded under March.</p>
       </div>
       <div className="panel">
         <div className="toolbar">
           <input placeholder="Search member or member ID…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="gridlegend"><span className="lg paid">Paid</span><span className="lg miss">Not paid (month has come)</span><span className="lg">Month not yet come</span><span className="lg dirty">Typed, not saved yet</span></div>
           <div className="fld"><small>Year</small><input type="number" value={year} style={{ width: 90 }} onChange={(e) => setYear(Number(e.target.value) || year)} /></div>
         </div>
+        {dirtyCount > 0 && <div className="draftbar"><b>{dirtyCount} typed entr{dirtyCount === 1 ? 'y is' : 'ies are'} not saved yet.</b> They are kept on this device, but are not recorded until you save. <button className="primary" onClick={saveAll}>Save now</button> <button className="secondary" onClick={discardDraft}>Discard</button></div>}
         <div className="tablewrap">
           <table className="gridtable">
             <thead><tr><th>Name</th>{MONTHS.map((m) => <th key={m}>{m}</th>)}<th>Total</th></tr></thead>
-            <tbody>{shown.map((m) => <tr key={m.id}><td><b>{m.name}</b><br /><small>{m.member_code || ''}</small></td>{MONTHS.map((_, i) => <td key={i}><input type="number" min="0" step="0.01" className="cellinput" value={valueFor(m.name, i + 1)} onChange={(e) => setValue(m.name, i + 1, e.target.value)} /></td>)}<td><b>{money(rowTotal(m.name))}</b></td></tr>)}{!shown.length && <tr><td colSpan={14} className="empty">No members match.</td></tr>}</tbody>
+            <tbody>{shown.map((m) => <tr key={m.id}><td><b>{m.name}</b><br /><small>{m.member_code || ''}</small></td>{MONTHS.map((_, i) => <td key={i} className={isDirty(m, i + 1) ? 'cdirty' : Number(valueFor(m, i + 1)) > 0 ? 'cpaid' : monthHasCome(i + 1) ? 'cmiss' : ''}><input type="number" min="0" step="0.01" className="cellinput" value={valueFor(m, i + 1)} onChange={(e) => setValue(m, i + 1, e.target.value)} /></td>)}<td><b>{money(rowTotal(m))}</b></td></tr>)}{!shown.length && <tr><td colSpan={14} className="empty">No members match.</td></tr>}</tbody>
             {shown.length > 0 && <tfoot><tr><td><b>Monthly total</b></td>{MONTHS.map((_, i) => <td key={i}><b>{money(monthTotal(i + 1))}</b></td>)}<td><b>{money(grandTotal)}</b></td></tr></tfoot>}
           </table>
         </div>
@@ -2370,7 +2409,7 @@ function auditChanges(r) {
   }
   return out;
 }
-const PASTOR_ONLY_TABLES = new Set(['prayer_requests', 'pastoral_cases']);
+const PASTOR_ONLY_TABLES = new Set(['prayer_requests', 'pastoral_cases', 'cashbook_entries', 'finance_reconciliations']);
 export function AuditLog() {
   const { role, hasPermission } = useAuth();
   const auditOk = isAdmin(role) || hasPermission('audit.view');
@@ -2438,7 +2477,7 @@ function ChangePassword() {
 
 export function Settings() {
   const { user, profile, role } = useAuth();
-  const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed, clearTestData } = useData();
+  const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed, retryFailed, clearTestData } = useData();
   const accountMember = (data.members || []).find(m => m.user_id === user?.id || (profile?.member_id && m.id === profile.member_id));
   const accountLabel = accountMember?.phone || formatLoginId(user?.email) || user?.email;
   const [resetPhrase, setResetPhrase] = useState('');
@@ -2486,9 +2525,9 @@ export function Settings() {
             <h2 style={{ marginTop: 18 }}>Changes the server rejected ({failed.length})</h2>
             <p className="muted">These changes were not applied. A conflict means another user changed the same record first; a permission or validation error means the server rejected the change.</p>
             <ul>
-              {failed.map((f, i) => <li key={i}>{f.op} in <b>{f.table}</b>{f.conflict ? ' — conflict' : ''}: {f.error}</li>)}
+              {failed.map((f, i) => <li key={i}>{f.op} in <b>{f.table}</b>{f.row?.person_name ? ` — ${f.row.person_name}, ${f.row.fund || ''} ${f.row.month}/${f.row.year}, GHS ${f.row.amount}` : ''}{f.conflict ? ' — conflict' : ''}: {f.error}</li>)}
             </ul>
-            <button className="secondary" onClick={discardFailed}>Clear this list</button>
+            <button className="primary" onClick={retryFailed}>Retry these changes</button> <button className="secondary" onClick={discardFailed}>Clear this list</button>
           </>
         )}
       </div>
@@ -3403,11 +3442,10 @@ function ExpenditureScreen() {
 export function Cashbook() {
   const { data, save, remove } = useData();
   const { role, hasPermission } = useAuth();
-  // Writing follows Finance -> Manage, but never for people who approve or the Pastor (separation of duties).
-  const permWrite = hasPermission('finance.manage') && role !== 'pastor' && role !== 'finance_reviewer' && !hasPermission('finance_reviewer.approve');
-  const permView = hasPermission('finance.view') || hasPermission('finance.manage');
-  const canWrite = ['admin','finance','secretary'].includes(role) || isSuperAdmin(role) || permWrite;
-  const canDelete = role === 'admin' || isSuperAdmin(role);
+  // The Cashbook is private to the Pastor: only the Pastor can open it, add to it, edit it or delete from it.
+  const isPastor = role === 'pastor';
+  const canWrite = isPastor;
+  const canDelete = isPastor;
 
   const [type, setType] = useState('Receipt');
   const [date, setDate] = useState(today());
@@ -3580,12 +3618,12 @@ export function Cashbook() {
     setStatus(`Opening Balance for ${year} saved.`);
     setAmount('');
   }
-  if (!canWrite && role !== 'viewer' && !permView) {
+  if (!isPastor) {
     return (
       <div className="panel">
         <h2>Church Cashbook</h2>
         <p className="muted">
-          You do not have permission to access the Cashbook.
+          The Cashbook is private to the Pastor.
         </p>
       </div>
     );
@@ -4135,8 +4173,9 @@ export function EngagementAutomation() {
 
 /* ---------------- V13 Finance Reconciliation + Engagement ---------------- */
 export function FinanceReconciliation() {
-  const { role, hasPermission } = useAuth();
-  if (!hasPermission('finance_reconciliation.view') && !['admin','finance'].includes(role) && !isSuperAdmin(role)) return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Finance access is restricted.</p></div>;
+  const { role } = useAuth();
+  // Reconciliation is private to the Pastor.
+  if (role !== 'pastor') return <div className="panel"><h2>Finance Reconciliation</h2><p className="muted">Reconciliation is private to the Pastor.</p></div>;
   return <FinanceReconciliationScreen />;
 }
 
