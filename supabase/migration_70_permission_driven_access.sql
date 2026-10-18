@@ -15,13 +15,12 @@
 -- Rules that still apply on top, unchanged:
 --   * Pastor and Finance Reviewer still cannot change money tables (migration 56 blocks it whatever is ticked).
 --   * For money tables, a group that can Review & Approve can never change them through this route (separation of duties).
---   * Prayer Requests and Pastoral Care stay private to the Pastor.
+--   * Prayer Requests, Pastoral Care, the Cashbook and Reconciliation stay private to the Pastor (migrations 63 and 71);
+--     they are deliberately NOT part of this migration.
 --   * Not changed here (they keep their own approve / lock / reopen workflow): writing Finance Center weekly reports,
 --     Deposit Slips and bank settings. Those are readable by "View Finance" but still saved by the Finance template.
 --     Users, Settings, Backup and Clear Test Data stay Admin / Super Admin only by design.
 
--- Helper used only by this migration. It has its own name (perm_ticked) on purpose: your database already has a
--- has_permission() function written by an earlier script, and this migration must not overwrite or depend on it.
 create or replace function public.perm_ticked(p_key text)
 returns boolean language sql stable security definer set search_path = public as $$
   select coalesce(
@@ -423,37 +422,6 @@ declare
   "sod": true,
   "select": [
    "finance.view"
-  ],
-  "insert": [
-   "finance.manage"
-  ],
-  "update": [
-   "finance.manage"
-  ]
- },
- {
-  "t": "finance_reconciliations",
-  "sod": true,
-  "select": [
-   "finance_reconciliation.view",
-   "finance_reconciliation.manage"
-  ],
-  "insert": [
-   "finance_reconciliation.manage"
-  ],
-  "update": [
-   "finance_reconciliation.manage"
-  ],
-  "delete": [
-   "finance_reconciliation.manage"
-  ]
- },
- {
-  "t": "cashbook_entries",
-  "sod": true,
-  "select": [
-   "finance.view",
-   "finance.manage"
   ],
   "insert": [
    "finance.manage"
