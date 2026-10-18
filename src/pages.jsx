@@ -1250,7 +1250,7 @@ export function Offerings() {
 /* ---------------- First Fruit / Welfare Dues: shared monthly grid ---------------- */
 // Both funds follow the identical "member x 12 months" pattern from the old workbooks
 // one editable grid, keyed by which roster and which fund it writes to.
-function ContributionsGrid({ fund, roster, title }) {
+function ContributionsGrid({ fund, roster, title, paidOnly = false }) {
   const { data, save } = useData();
   const [year, setYear] = useState(new Date().getFullYear());
   const [q, setQ] = useState('');
@@ -1270,15 +1270,35 @@ function ContributionsGrid({ fund, roster, title }) {
   useEffect(() => { setEdits({}); }, [year, fund]);
   useEffect(() => { if (memberId && !roster.some(m => m.id === memberId)) setMemberId(''); }, [roster, memberId]);
 
-  // Order: members who have paid something this year first, then by member ID. Based on SAVED payments, so a row does not jump while you type.
-  const paidSaved = useMemo(() => { const s = new Set(); existing.forEach((c) => { if (Number(c.amount) > 0) s.add(c.person_name); }); return s; }, [existing]);
-  const byId = (a, b) => String(a.member_code || '\uffff').localeCompare(String(b.member_code || '\uffff'), undefined, { numeric: true, sensitivity: 'base' }) || String(a.name).localeCompare(String(b.name));
-  const shown = roster
-    .filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()) || String(m.member_code || '').toLowerCase().includes(q.trim().toLowerCase()))
-    .sort((a, b) => (paidSaved.has(b.name) - paidSaved.has(a.name)) || byId(a, b));
-  // Colours: green = has an amount; light red = a month that has already come with nothing paid; months not yet come stay plain.
-  const nowD = new Date();
-  const monthHasCome = (mth) => Number(year) < nowD.getFullYear() || (Number(year) === nowD.getFullYear() && mth <= nowD.getMonth() + 1);
+  // Order: members who have paid something this year first, then by Member ID in natural order (DTA1, DTA2, ... DTA10).
+  // Based on SAVED payments only, so a row does not jump around while you are typing in it.
+  const paidNames = useMemo(() => {
+    const set = new Set();
+    existing.forEach((c) => { if (Number(c.amount) > 0) set.add(c.person_name); });
+    return set;
+  }, [existing]);
+  const sortedRoster = useMemo(() => [...roster].sort((a, b) => {
+    const pa = paidNames.has(a.name) ? 0 : 1;
+    const pb = paidNames.has(b.name) ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    const ca = String(a.member_code || '').trim();
+    const cb = String(b.member_code || '').trim();
+    if (!ca !== !cb) return ca ? -1 : 1; // members without an ID go last
+    return ca.localeCompare(cb, undefined, { numeric: true, sensitivity: 'base' }) || a.name.localeCompare(b.name);
+  }), [roster, paidNames]);
+
+  // Light green = has a payment. Light red = a past month with no payment. Current and future months stay plain.
+  const now = new Date();
+  const isPastMonth = (mth) => Number(year) < now.getFullYear() || (Number(year) === now.getFullYear() && mth < now.getMonth() + 1);
+  const cellClass = (name, mth) => {
+    if (Number(valueFor(name, mth)) > 0) return 'ff-paid';
+    return isPastMonth(mth) ? 'ff-unpaid' : undefined;
+  };
+
+  // First Fruit Register: only people who have paid something in the selected year are listed.
+  // Everyone else appears automatically the moment a payment is saved for them (use "Add payment" above).
+  const listed = paidOnly ? sortedRoster.filter((m) => paidNames.has(m.name)) : sortedRoster;
+  const shown = listed.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase()) || String(m.member_code || '').toLowerCase().includes(q.trim().toLowerCase()));
   const valueFor = (name, mth) => {
     const k = name + '|' + mth;
     if (k in edits) return edits[k];
@@ -1346,13 +1366,12 @@ function ContributionsGrid({ fund, roster, title }) {
       <div className="panel">
         <div className="toolbar">
           <input placeholder="Search member or member ID…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="gridlegend"><span className="lg paid">Paid</span><span className="lg miss">Not paid (month has come)</span><span className="lg">Month not yet come</span></div>
           <div className="fld"><small>Year</small><input type="number" value={year} style={{ width: 90 }} onChange={(e) => setYear(Number(e.target.value) || year)} /></div>
         </div>
         <div className="tablewrap">
           <table className="gridtable">
             <thead><tr><th>Name</th>{MONTHS.map((m) => <th key={m}>{m}</th>)}<th>Total</th></tr></thead>
-            <tbody>{shown.map((m) => <tr key={m.id}><td><b>{m.name}</b><br /><small>{m.member_code || ''}</small></td>{MONTHS.map((_, i) => <td key={i} className={Number(valueFor(m.name, i + 1)) > 0 ? 'cpaid' : monthHasCome(i + 1) ? 'cmiss' : ''}><input type="number" min="0" step="0.01" className="cellinput" value={valueFor(m.name, i + 1)} onChange={(e) => setValue(m.name, i + 1, e.target.value)} /></td>)}<td><b>{money(rowTotal(m.name))}</b></td></tr>)}{!shown.length && <tr><td colSpan={14} className="empty">No members match.</td></tr>}</tbody>
+            <tbody>{shown.map((m) => <tr key={m.id}><td><b>{m.name}</b><br /><small>{m.member_code || ''}</small></td>{MONTHS.map((_, i) => <td key={i} className={cellClass(m.name, i + 1)}><input type="number" min="0" step="0.01" className="cellinput" value={valueFor(m.name, i + 1)} onChange={(e) => setValue(m.name, i + 1, e.target.value)} /></td>)}<td><b>{money(rowTotal(m.name))}</b></td></tr>)}{!shown.length && <tr><td colSpan={14} className="empty">{paidOnly && !q.trim() ? `No ${fund} payments recorded for ${year} yet. Use "Add payment" above and the member will appear here.` : 'No members match.'}</td></tr>}</tbody>
             {shown.length > 0 && <tfoot><tr><td><b>Monthly total</b></td>{MONTHS.map((_, i) => <td key={i}><b>{money(monthTotal(i + 1))}</b></td>)}<td><b>{money(grandTotal)}</b></td></tr></tfoot>}
           </table>
         </div>
@@ -1364,7 +1383,7 @@ function ContributionsGrid({ fund, roster, title }) {
 export function FirstFruit() {
   const { data } = useData();
   const roster = [...data.members].filter((m) => !['Inactive', 'Left'].includes(m.status)).sort((a, b) => a.name.localeCompare(b.name));
-  return <ContributionsGrid fund="First Fruit" roster={roster} title="First Fruit Register" />;
+  return <ContributionsGrid fund="First Fruit" roster={roster} title="First Fruit Register" paidOnly />;
 }
 
 export function WelfareDues() {
@@ -2447,7 +2466,7 @@ function ChangePassword() {
 
 export function Settings() {
   const { user, profile, role } = useAuth();
-  const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed, retryFailed, clearTestData } = useData();
+  const { data, pending, failed, online, syncError, lastSync, syncNow, discardFailed, clearTestData } = useData();
   const accountMember = (data.members || []).find(m => m.user_id === user?.id || (profile?.member_id && m.id === profile.member_id));
   const accountLabel = accountMember?.phone || formatLoginId(user?.email) || user?.email;
   const [resetPhrase, setResetPhrase] = useState('');
@@ -2495,9 +2514,9 @@ export function Settings() {
             <h2 style={{ marginTop: 18 }}>Changes the server rejected ({failed.length})</h2>
             <p className="muted">These changes were not applied. A conflict means another user changed the same record first; a permission or validation error means the server rejected the change.</p>
             <ul>
-              {failed.map((f, i) => <li key={i}>{f.op} in <b>{f.table}</b>{f.row?.person_name ? ` — ${f.row.person_name}, ${f.row.fund || ''} ${f.row.month}/${f.row.year}, GHS ${f.row.amount}` : ''}{f.conflict ? ' — conflict' : ''}: {f.error}</li>)}
+              {failed.map((f, i) => <li key={i}>{f.op} in <b>{f.table}</b>{f.conflict ? ' — conflict' : ''}: {f.error}</li>)}
             </ul>
-            <button className="primary" onClick={retryFailed}>Retry these changes</button> <button className="secondary" onClick={discardFailed}>Clear this list</button>
+            <button className="secondary" onClick={discardFailed}>Clear this list</button>
           </>
         )}
       </div>

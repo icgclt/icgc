@@ -54,7 +54,9 @@ export const PERMS = {
   payment_receipts:      { read: ['admin','finance','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
   communication_templates: { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
   communication_queue:   { read: ['admin','secretary'], write: ['admin','secretary'], del: ['admin'] },
-  finance_reconciliations:{ read: ['admin','finance'], write: ['admin','finance'], del: ['admin'] },
+  // Private to the Pastor (Cashbook and Reconciliation): nobody else, including Admin and Super Admin.
+  finance_reconciliations:{ read: ['pastor'], write: ['pastor'], del: ['pastor'] },
+  cashbook_entries:{ read: ['pastor'], write: ['pastor'], del: ['pastor'] },
   finance_weekly_reports:  { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
   finance_weekly_cash_counts:{ read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
   finance_weekly_momo:    { read: ['admin','finance','finance_reviewer','pastor','secretary','viewer'], write: ['admin','finance'], del: ['admin'] },
@@ -97,8 +99,6 @@ const TABLE_PERMS = {
   offering_entries: TP(['finance.view'], ['finance.manage']),
   pledges: TP(['finance.view'], ['finance.manage']),
   payment_receipts: TP(['finance.view'], ['finance.manage']),
-  finance_reconciliations: TP(['finance_reconciliation.view'], ['finance_reconciliation.manage']),
-  cashbook_entries: TP(['finance.view'], ['finance.manage']),
   communication_templates: TP(['notifications.view'], ['notifications.manage']),
   communication_queue: TP(['notifications.view'], ['notifications.manage']),
   announcements: TP(['notifications.view'], ['notifications.manage']),
@@ -112,7 +112,7 @@ const TABLE_PERMS = {
   offering_deposits: { read: ['finance.view'] },
 };
 // Money tables: people who approve, and the Pastor, never prepare or edit them (separation of duties).
-const MONEY_TABLES = new Set(['welfare_transactions', 'member_contributions', 'giving', 'offering_entries', 'pledges', 'payment_receipts', 'finance_reconciliations', 'cashbook_entries']);
+const MONEY_TABLES = new Set(['welfare_transactions', 'member_contributions', 'giving', 'offering_entries', 'pledges', 'payment_receipts']);
 export const can = (role, table, action) => {
   if (PERMS[table]?.[action]?.includes(effectiveRole(role))) return true;
   const keys = TABLE_PERMS[table]?.[action];

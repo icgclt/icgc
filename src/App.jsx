@@ -227,14 +227,13 @@ function NavLabel({ label }) {
 }
 
 function SyncBadge() {
-  const { online, syncError, syncing, pending, syncNow, failed } = useData();
+  const { online, syncError, syncing, pending, syncNow } = useData();
   const connected = online && !syncError;
   return (
     <button className="syncbadge" onClick={syncNow} title="Click to sync now">
       <span className={'dot ' + (connected ? 'ok' : 'off')} />
       {syncing ? 'Syncing…' : connected ? 'Online' : 'Offline'}
       {pending > 0 && <span className="pill">{pending} unsynced</span>}
-      {failed.length > 0 && <span className="pill" style={{ background: '#b91c1c', color: '#fff' }}>{failed.length} change(s) rejected — open Settings to retry</span>}
     </button>
   );
 }

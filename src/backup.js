@@ -25,7 +25,7 @@ export const RESTORE_TABLES = [
 
 // Private to the Pastor. An administrator cannot read them, so they are left out of downloaded backup files
 // (they are still included in the automatic server snapshots).
-export const PASTOR_ONLY_TABLES = ['prayer_requests', 'pastoral_cases'];
+export const PASTOR_ONLY_TABLES = ['prayer_requests', 'pastoral_cases', 'cashbook_entries', 'finance_reconciliations'];
 
 // Tables protected by finance lock/workflow triggers. Only the database restore function can bring these
 // back faithfully; the plain fallback restore skips them.
@@ -157,7 +157,7 @@ export function createBackupEngine({ client, identity = {}, sleep = sleepDefault
     const data = {}; const meta = {}; const missing = []; const warnings = [];
     const skipped = tables.filter((t) => PASTOR_ONLY_TABLES.includes(t));
     tables = tables.filter((t) => !PASTOR_ONLY_TABLES.includes(t));
-    if (skipped.length) warnings.push('Prayer requests and pastoral care cases are private to the Pastor, so they are not included in downloaded backup files. They are still included in the automatic server snapshots.');
+    if (skipped.length) warnings.push('Prayer requests, pastoral care cases, the Cashbook and Reconciliation records are private to the Pastor, so they are not included in downloaded backup files. They are still included in the automatic server snapshots.');
     let done = 0;
     for (const t of tables) {
       onProgress({ phase: 'export', table: t, done, total: tables.length });

@@ -104,6 +104,19 @@ async function send(op) {
     const row = { ...op.row };
     SERVER_FIELDS.forEach((k) => delete row[k]);
 
+    // First Fruit / Welfare Dues grid: the database allows only ONE row per fund + person + year + month.
+    // Entries typed offline get a brand-new id, so if that month already exists on the server (or was typed on
+    // another device) a plain insert is rejected and the entry used to vanish on the next sync.
+    // Saving by that natural key updates the existing row instead, so nothing typed offline is lost.
+    if (op.table === 'member_contributions') {
+      const { data, error, status } = await supabase
+        .from('member_contributions')
+        .upsert(row, { onConflict: 'fund,person_name,year,month' })
+        .select('*')
+        .single();
+      return { error, status, data };
+    }
+
     if (op.expectedUpdatedAt) {
       const { data, error, status } = await supabase
         .from(op.table)
@@ -112,25 +125,9 @@ async function send(op) {
         .eq('updated_at', op.expectedUpdatedAt)
         .select('*');
       if (!error && (!data || data.length === 0)) {
-        // Register payments: the figure typed last wins, so it is not thrown away if the record was edited elsewhere meanwhile.
-        if (op.table === 'member_contributions') {
-          const retry = await supabase.from(op.table).update(row).eq('id', op.row.id).select('*');
-          if (!retry.error && retry.data?.length) return { error: null, status: retry.status, data: retry.data[0] };
-        }
         return { error: { message: 'Conflict: this record was changed by another user.', code: 'CONFLICT' }, status: 409, conflict: true };
       }
       return { error, status, data: data?.[0] };
-    }
-
-    if (op.table === 'member_contributions') {
-      // The register allows one payment per fund + person + year + month. If this browser did not know that record yet
-      // (typed offline, or entered on another device), update the existing record instead of failing on the duplicate.
-      const found = await supabase.from(op.table).select('id').eq('fund', row.fund).eq('person_name', row.person_name).eq('year', row.year).eq('month', row.month).maybeSingle();
-      if (!found.error && found.data && found.data.id !== op.row.id) {
-        const { id: _drop, ...rest } = row;
-        const { data, error, status } = await supabase.from(op.table).update(rest).eq('id', found.data.id).select('*').single();
-        return { error, status, data };
-      }
     }
 
     const { data, error, status } = await supabase.from(op.table).upsert(row).select('*').single();
@@ -262,13 +259,14 @@ function DataProviderInner({ uid, role, initial, children }) {
           addFailed({ ...op, error: error.message, at: new Date().toISOString(), conflict: !!result.conflict });
         } else if (result.data && op.op === 'upsert') {
           // Replace optimistic metadata with the server's trigger-generated timestamps.
-          const rows = dataRef.current[op.table] || [];
+          let rows = dataRef.current[op.table] || [];
+          if (result.data.id !== op.row.id) rows = rows.filter((r) => r.id !== result.data.id); // avoid a duplicate of the merged row
           commit(op.table, rows.map((r) => r.id === op.row.id ? { ...r, ...result.data } : r));
           // If the same record was edited more than once while offline, later queued edits
           // should build on this successful server version instead of falsely conflicting.
           outboxRef.current = outboxRef.current.map((queued, index) =>
             index > 0 && queued.table === op.table && (queued.row?.id === op.row.id || queued.id === op.row.id)
-              ? { ...queued, ...(queued.row ? { row: { ...queued.row, id: result.data.id } } : {}), ...(queued.id ? { id: result.data.id } : {}), expectedUpdatedAt: result.data.updated_at }
+              ? { ...queued, expectedUpdatedAt: result.data.updated_at, ...(queued.row && result.data.id !== op.row.id ? { row: { ...queued.row, id: result.data.id } } : {}) }
               : queued
           );
         }
@@ -444,14 +442,6 @@ function DataProviderInner({ uid, role, initial, children }) {
 
   const discardFailed = () => { failedRef.current = []; write(fkey, []); write(sfkey, [], sensitiveStorage); setFailed([]); };
 
-  // Put the rejected changes back in the queue and send them again (register payments are re-sent without the old version check).
-  const retryFailed = () => {
-    const again = failedRef.current.map(({ error, at, conflict, ...op }) => (op.table === 'member_contributions' ? { ...op, expectedUpdatedAt: undefined } : op));
-    failedRef.current = []; write(fkey, []); write(sfkey, [], sensitiveStorage); setFailed([]);
-    setOutbox([...outboxRef.current, ...again]);
-    syncRef.current(true);
-  };
-
   const wipe = () => {
     dropPendingSaves();
     ACTIVE_TABLES.forEach((t) => { deleteCache(ck(t)); removeStored(wmk(t)); });
@@ -480,7 +470,7 @@ function DataProviderInner({ uid, role, initial, children }) {
   };
 
   const value = {
-    data, save, remove, wipe, clearTestData, discardFailed, retryFailed,
+    data, save, remove, wipe, clearTestData, discardFailed,
     pending, failed, online, syncError, syncing, lastSync,
     syncNow: () => { forceReconcile.current = true; return syncRef.current(true); },
   };
